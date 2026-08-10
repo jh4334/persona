@@ -1,10 +1,24 @@
-"""학급/학생 페르소나 로딩 및 검증."""
+"""학급/학생 페르소나 로딩 및 검증.
+
+스키마 v2: 기본 필드 + 5개 속성 그룹(cognitive, language, motivation,
+behavior_social, environment). 속성 그룹은 모두 선택이며, 자세한 작성법은
+docs/persona_schema.md 참조. v1 파일(속성 그룹 없음)도 그대로 동작한다.
+"""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# 프롬프트에 표시할 속성 그룹 이름 (표시 순서 유지)
+ATTRIBUTE_GROUPS: dict[str, str] = {
+    "cognitive": "인지·학습 능력",
+    "language": "언어 능력",
+    "motivation": "동기·정서",
+    "behavior_social": "행동·사회성",
+    "environment": "배경·환경",
+}
 
 
 @dataclass
@@ -18,6 +32,12 @@ class Student:
     personality: str = ""
     social: str = ""
     notes: str = ""
+    # v2 속성 그룹 — {"문해력": "학년 수준", ...} 형태의 자유 키-값
+    cognitive: dict[str, str] = field(default_factory=dict)
+    language: dict[str, str] = field(default_factory=dict)
+    motivation: dict[str, str] = field(default_factory=dict)
+    behavior_social: dict[str, str] = field(default_factory=dict)
+    environment: dict[str, str] = field(default_factory=dict)
 
     def to_prompt_block(self) -> str:
         """시뮬레이션 프롬프트에 넣을 학생 프로필 텍스트."""
@@ -31,6 +51,11 @@ class Student:
             f"성격: {self.personality}",
             f"교우 관계: {self.social}",
         ]
+        for key, label in ATTRIBUTE_GROUPS.items():
+            attrs: dict[str, str] = getattr(self, key)
+            if attrs:
+                lines.append(f"[{label}]")
+                lines.extend(f"  - {k}: {v}" for k, v in attrs.items())
         if self.notes:
             lines.append(f"교사 메모: {self.notes}")
         return "\n".join(lines)
@@ -46,20 +71,22 @@ class Classroom:
 
 def load_classroom(path: str | Path) -> Classroom:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    students = [
-        Student(
-            id=s["id"],
-            name=s["name"],
-            achievement_level=s.get("achievement_level", "정보 없음"),
-            prior_knowledge=s.get("prior_knowledge", ""),
-            learning_style=s.get("learning_style", ""),
-            interests=s.get("interests", []),
-            personality=s.get("personality", ""),
-            social=s.get("social", ""),
-            notes=s.get("notes", ""),
+    students = []
+    for s in data["students"]:
+        students.append(
+            Student(
+                id=s["id"],
+                name=s["name"],
+                achievement_level=s.get("achievement_level", "정보 없음"),
+                prior_knowledge=s.get("prior_knowledge", ""),
+                learning_style=s.get("learning_style", ""),
+                interests=s.get("interests", []),
+                personality=s.get("personality", ""),
+                social=s.get("social", ""),
+                notes=s.get("notes", ""),
+                **{g: dict(s.get(g, {})) for g in ATTRIBUTE_GROUPS},
+            )
         )
-        for s in data["students"]
-    ]
     if not students:
         raise ValueError(f"{path}: students 목록이 비어 있습니다.")
     return Classroom(
