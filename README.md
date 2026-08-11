@@ -48,7 +48,7 @@ PYTHONPATH=src python -m classroom_sim \
 
 ## 나만의 학급 만들기
 
-`personas/class_6_3.json`을 복사해 수정하세요. MatrAIx의 4영역 속성 체계(배경/심리/능력/행동)를 교실용으로 재설계한 **5개 속성 그룹**(인지·학습 능력, 언어 능력, 동기·정서, 행동·사회성, 배경·환경)을 학생별로 추가할 수 있으며, 전체 스키마와 작성 원칙은 **[docs/persona_schema.md](docs/persona_schema.md)** 를 참고하세요. 기본 필드:
+`personas/class_6_3.json`을 복사해 수정하세요. MatrAIx의 4영역 속성 체계(배경/심리/능력/행동)를 교실용으로 재설계한 **9개 그룹 · 102개 속성 카탈로그**(`personas/schema/dimensions.json`)에서 필요한 속성을 골라 학생별로 채웁니다. 전체 속성 목록은 [docs/dimension_reference.md](docs/dimension_reference.md), 작성 원칙은 [docs/persona_schema.md](docs/persona_schema.md)를 참고하세요. 기본 필드:
 
 ```jsonc
 {

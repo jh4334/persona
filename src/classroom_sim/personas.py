@@ -12,12 +12,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # 프롬프트에 표시할 속성 그룹 이름 (표시 순서 유지)
+# 전체 속성 카탈로그(그룹별 세부 속성 100개)는 personas/schema/dimensions.json 참조
 ATTRIBUTE_GROUPS: dict[str, str] = {
     "cognitive": "인지·학습 능력",
+    "subject_skills": "교과 역량",
     "language": "언어 능력",
     "motivation": "동기·정서",
     "behavior_social": "행동·사회성",
+    "study_habits": "학습 습관·자기관리",
     "environment": "배경·환경",
+    "health_development": "건강·발달 배려",
+    "digital": "디지털·매체",
 }
 
 
@@ -32,12 +37,16 @@ class Student:
     personality: str = ""
     social: str = ""
     notes: str = ""
-    # v2 속성 그룹 — {"문해력": "학년 수준", ...} 형태의 자유 키-값
+    # 속성 그룹 — {"문해력": "학년 수준", ...} 형태의 키-값 (권장 키: dimensions.json)
     cognitive: dict[str, str] = field(default_factory=dict)
+    subject_skills: dict[str, str] = field(default_factory=dict)
     language: dict[str, str] = field(default_factory=dict)
     motivation: dict[str, str] = field(default_factory=dict)
     behavior_social: dict[str, str] = field(default_factory=dict)
+    study_habits: dict[str, str] = field(default_factory=dict)
     environment: dict[str, str] = field(default_factory=dict)
+    health_development: dict[str, str] = field(default_factory=dict)
+    digital: dict[str, str] = field(default_factory=dict)
 
     def to_prompt_block(self) -> str:
         """시뮬레이션 프롬프트에 넣을 학생 프로필 텍스트."""
