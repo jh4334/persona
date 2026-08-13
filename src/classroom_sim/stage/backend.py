@@ -1,6 +1,8 @@
 """LLM 백엔드 추상화.
 
 - AnthropicBackend: Claude API (감독=저비용 모델, 학생/분석=고품질 모델)
+- CodexBackend: OpenAI Codex CLI(`codex exec`) 서브프로세스 — ChatGPT 구독 로그인으로
+  동작하므로 API 키·API 과금이 필요 없다.
 - MockBackend: API 키 없이 완전히 동작하는 결정적 규칙 기반 백엔드 (데모·테스트·CI용)
 
 `anthropic` 패키지는 AnthropicBackend 안에서 지연 import 하므로, mock만 쓸 때는
@@ -10,13 +12,20 @@ SDK가 설치되어 있지 않아도 동작한다.
 from __future__ import annotations
 
 import json
+import os
 import random
 import re
+import shutil
+import subprocess
+import tempfile
 from typing import Any, Protocol, runtime_checkable
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 DEFAULT_DIRECTOR_MODEL = "claude-haiku-4-5"
 DEFAULT_ACTOR_MODEL = "claude-opus-5"
+
+# codex 실행 파일 경로를 덮어쓰는 환경변수
+CODEX_BIN_ENV = "CLASSROOM_SIM_CODEX_BIN"
 
 # 감독/학생 요청에 구조화 데이터를 실어 보내는 태그.
 # 실제 LLM에게는 읽기 쉬운 근거 자료가 되고, MockBackend는 이 블록을 파싱해 규칙을 적용한다.
@@ -165,6 +174,211 @@ class AnthropicBackend:
         if response.stop_reason == "refusal":
             raise BackendError("요청이 안전상의 이유로 거부되었습니다 (refusal).")
         return self._text_of(response)
+
+
+# --------------------------------------------------------------------------
+# Codex CLI 백엔드 (ChatGPT 구독 로그인, API 키 불필요)
+# --------------------------------------------------------------------------
+
+# JSON 전용 출력을 강제하는 꼬리말
+_CODEX_JSON_RULE = (
+    "아래 JSON 스키마에 정확히 맞는 JSON 객체 **하나만** 출력하라. "
+    "코드펜스·설명·주석 금지."
+)
+
+# codex CLI가 없을 때 안내 문구
+_CODEX_MISSING_HINT = (
+    "codex CLI를 찾을 수 없습니다. npm install -g @openai/codex 후 codex login 을 실행하세요."
+)
+
+# 로그인/한도 문제에 공통으로 붙이는 안내 문구
+_CODEX_AUTH_HINT = "codex login 상태와 구독 한도를 확인하세요."
+
+
+def flatten_text(value: Any) -> str:
+    """문자열 또는 content 블록 리스트를 한 덩어리 텍스트로 평탄화한다."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for block in value:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type", "text") == "text":
+                parts.append(block.get("text", ""))
+        return "\n\n".join(p for p in parts if p)
+    return str(value)
+
+
+def _strip_fence(text: str) -> str:
+    """```json ... ``` / ``` ... ``` 코드펜스를 벗겨낸다."""
+    body = (text or "").strip()
+    if not body.startswith("```"):
+        return body
+    # 첫 줄(``` 또는 ```json)을 버리고, 마지막 ``` 이전까지를 취한다.
+    body = body.split("\n", 1)[1] if "\n" in body else ""
+    end = body.rfind("```")
+    if end >= 0:
+        body = body[:end]
+    return body.strip()
+
+
+def parse_loose_json(text: str) -> dict:
+    """코드펜스·잡담이 섞인 응답에서 JSON 객체 하나를 뽑아낸다."""
+    body = _strip_fence(text)
+    start = body.find("{")
+    end = body.rfind("}")
+    if start >= 0 and end > start:
+        body = body[start:end + 1]
+    data = json.loads(body)
+    if not isinstance(data, dict):
+        raise ValueError("JSON 객체(dict)가 아닙니다.")
+    return data
+
+
+class CodexBackend:
+    """OpenAI Codex CLI를 비대화형(`codex exec`)으로 호출하는 백엔드.
+
+    ChatGPT 구독으로 `codex login` 해 둔 CLI를 서브프로세스로 부르므로
+    API 키나 API 과금 없이 시뮬레이션을 돌릴 수 있다. 대신 호출마다 프로세스가
+    새로 뜨기 때문에 느리고, 출력 토큰 수(max_tokens)는 제어할 수 없다.
+    """
+
+    supports_cache = False  # 프롬프트 캐싱 없음(호출마다 새 프로세스)
+
+    def __init__(
+        self,
+        codex_bin: str | None = None,
+        model: str | None = None,
+        timeout: int = 300,
+    ) -> None:
+        self.codex_bin = codex_bin or os.environ.get(CODEX_BIN_ENV) or "codex"
+        self.model = model
+        self.timeout = timeout
+
+    # -- 내부 --
+
+    def _run(self, prompt: str) -> str:
+        """codex exec 1회 실행 후 마지막 메시지 텍스트를 돌려준다."""
+        # 코덱스가 이 저장소를 뒤지지 못하도록 빈 임시 디렉터리에서 실행한다.
+        workdir = tempfile.mkdtemp(prefix="classroom_sim_codex_")
+        out_path = os.path.join(workdir, "last_message.txt")
+        cmd = [
+            self.codex_bin,
+            "exec",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+            "--output-last-message",
+            out_path,
+        ]
+        if self.model:
+            cmd += ["--model", self.model]
+        cmd.append(prompt)
+
+        try:
+            proc = subprocess.run(  # noqa: S603 — 인자 리스트 고정, 셸 미사용
+                cmd,
+                cwd=workdir,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+            )
+        except FileNotFoundError as e:
+            raise BackendError(_CODEX_MISSING_HINT) from e
+        except subprocess.TimeoutExpired as e:
+            raise BackendError(
+                f"codex 응답이 {self.timeout}초 안에 오지 않았습니다. "
+                "타임아웃을 늘리거나(CodexBackend(timeout=...)) 프롬프트를 줄여 보세요."
+            ) from e
+        else:
+            if proc.returncode != 0:
+                raise BackendError(
+                    f"codex 실행 실패(종료코드 {proc.returncode}). "
+                    f"{_CODEX_AUTH_HINT}\n--- codex stderr ---\n{_tail(proc.stderr)}"
+                )
+            try:
+                with open(out_path, encoding="utf-8") as f:
+                    text = f.read().strip()
+            except OSError:
+                text = ""
+            if not text:
+                raise BackendError(
+                    "codex가 빈 응답을 돌려주었습니다. "
+                    f"{_CODEX_AUTH_HINT}\n--- codex stdout ---\n{_tail(proc.stdout)}"
+                )
+            return text
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+    @staticmethod
+    def _prompt(system: Any, messages: list[dict]) -> str:
+        """system + messages를 코덱스에 넘길 하나의 프롬프트 텍스트로 합친다."""
+        parts = []
+        head = flatten_text(system).strip()
+        if head:
+            parts.append(f"[역할 지시]\n{head}")
+        for message in messages or []:
+            body = _message_text(message).strip()
+            if not body:
+                continue
+            label = "사용자" if message.get("role", "user") == "user" else "이전 응답"
+            parts.append(f"[{label}]\n{body}")
+        return "\n\n".join(parts)
+
+    # -- 공개 API --
+
+    def complete_text(
+        self,
+        *,
+        system: Any,
+        messages: list[dict],
+        max_tokens: int = 2048,  # 코덱스는 출력 길이를 제어할 수 없어 무시한다
+        model_role: str = "actor",  # 모델은 인스턴스 단위로 하나만 쓴다
+    ) -> str:
+        return self._run(self._prompt(system, messages))
+
+    def complete_json(
+        self,
+        *,
+        system: Any,
+        messages: list[dict],
+        schema: dict,
+        max_tokens: int = 2048,  # 무시(코덱스가 제어 불가)
+        model_role: str = "actor",
+    ) -> dict:
+        base = self._prompt(system, messages)
+        prompt = (
+            f"{base}\n\n{_CODEX_JSON_RULE}\n"
+            f"{json.dumps(schema, ensure_ascii=False)}"
+        )
+        raw = self._run(prompt)
+        try:
+            return parse_loose_json(raw)
+        except (json.JSONDecodeError, ValueError) as first:
+            # 1회 재시도: 직전 응답과 파싱 오류를 붙여 JSON만 다시 요청한다.
+            retry = (
+                f"{prompt}\n\n"
+                f"[직전 응답]\n{_tail(raw)}\n\n"
+                f"[파싱 오류]\n{first}\n\n"
+                "위 응답은 JSON으로 파싱되지 않았다. 설명 없이 JSON만 다시 출력하라."
+            )
+            retry_raw = self._run(retry)
+            try:
+                return parse_loose_json(retry_raw)
+            except (json.JSONDecodeError, ValueError) as second:
+                raise BackendError(
+                    f"codex 응답 JSON 파싱 실패(재시도 포함): {second}\n"
+                    f"--- 마지막 응답 ---\n{_tail(retry_raw)}"
+                ) from second
+
+
+def _tail(text: str | None, limit: int = 800) -> str:
+    """오류 메시지에 붙일 만큼만 잘라낸다."""
+    body = (text or "").strip()
+    return body if len(body) <= limit else "…" + body[-limit:]
 
 
 # --------------------------------------------------------------------------
@@ -567,11 +781,20 @@ def make_backend(
     seed: int | None = None,
     director_model: str = DEFAULT_DIRECTOR_MODEL,
     actor_model: str = DEFAULT_ACTOR_MODEL,
+    codex_bin: str | None = None,
+    codex_model: str | None = None,
+    codex_timeout: int = 300,
 ) -> LLMBackend:
-    """백엔드 생성. name은 "anthropic" 또는 "mock"."""
+    """백엔드 생성. name은 "anthropic", "codex", "mock" 중 하나.
+
+    codex 전용 인자(codex_bin/codex_model/codex_timeout)는 모두 선택이며,
+    기본 호출은 make_backend("codex") 만으로 동작한다.
+    """
     key = (name or "").strip().lower()
     if key == "anthropic":
         return AnthropicBackend(director_model=director_model, actor_model=actor_model)
+    if key == "codex":
+        return CodexBackend(codex_bin=codex_bin, model=codex_model, timeout=codex_timeout)
     if key == "mock":
         return MockBackend(seed=seed)
-    raise ValueError(f"알 수 없는 백엔드: {name!r} (anthropic|mock)")
+    raise ValueError(f"알 수 없는 백엔드: {name!r} (anthropic|codex|mock)")

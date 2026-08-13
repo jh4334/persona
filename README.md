@@ -44,7 +44,9 @@ PYTHONPATH=src python -m classroom_sim \
 # 터미널판 — API 키 없이 mock 백엔드로 바로 체험 가능
 PYTHONPATH=src python -m classroom_sim.stage \
     --personas personas/class_6_3.json --lesson lessons/ratio_and_rate.md \
-    --backend mock          # 실제 AI 반응은 --backend anthropic (ANTHROPIC_API_KEY 필요)
+    --backend mock          # API 키 없이 바로 체험 (규칙 기반)
+#   --backend codex         # ChatGPT 구독으로 실제 AI 반응 (npm i -g @openai/codex 후 codex login, API 과금 없음)
+#   --backend anthropic     # Claude API 사용 (ANTHROPIC_API_KEY 또는 ant auth login)
 
 # 웹판 — 게더타운풍 도트 교실 (브라우저에서 http://localhost:8000)
 pip install -r requirements.txt

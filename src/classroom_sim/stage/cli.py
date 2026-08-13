@@ -73,12 +73,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--personas", required=True, help="학급 페르소나 JSON 경로")
     parser.add_argument("--lesson", required=True, help="학습단원 마크다운 경로")
-    parser.add_argument("--backend", default="mock", choices=["mock", "anthropic"],
-                        help="LLM 백엔드 (기본: mock — API 키 불필요)")
+    parser.add_argument("--backend", default="mock", choices=["mock", "anthropic", "codex"],
+                        help="LLM 백엔드 (기본: mock — API 키 불필요 / "
+                             "codex — ChatGPT 구독으로 로그인한 codex CLI 사용)")
     parser.add_argument("--seed", type=int, default=None, help="mock 백엔드 난수 시드")
     parser.add_argument("--out", default="reports", help="리포트 출력 디렉터리 (기본: reports/)")
     parser.add_argument("--director-model", default="claude-haiku-4-5", help="감독 모델 (anthropic)")
     parser.add_argument("--actor-model", default="claude-opus-5", help="학생/분석 모델 (anthropic)")
+    parser.add_argument("--codex-bin", default=None,
+                        help="codex 실행 파일 경로 (기본: $CLASSROOM_SIM_CODEX_BIN 또는 codex)")
+    parser.add_argument("--codex-model", default=None, help="codex 모델 이름 (생략 시 codex 기본값)")
+    parser.add_argument("--codex-timeout", type=int, default=300,
+                        help="codex 호출 1회 타임아웃 초 (기본: 300)")
     return parser
 
 
@@ -94,6 +100,9 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         director_model=args.director_model,
         actor_model=args.actor_model,
+        codex_bin=args.codex_bin,
+        codex_model=args.codex_model,
+        codex_timeout=args.codex_timeout,
     )
     session = StageSession(classroom, lesson_text, backend, seed=args.seed)
     names = {s.id: s.name for s in classroom.students}
