@@ -36,6 +36,23 @@ PYTHONPATH=src python -m classroom_sim \
 
 실행이 끝나면 `reports/ratio_and_rate_report.md`가 생성됩니다. 출력 예시는 [docs/example_report.md](docs/example_report.md)를 참고하세요.
 
+## 교실 무대 — 실시간 수업 시뮬레이션 (v0.3~v0.5)
+
+일괄 리포트 대신, 교사가 한 마디씩 수업을 진행하며 학생들이 실시간으로 반응하는 모드입니다.
+
+```bash
+# 터미널판 — API 키 없이 mock 백엔드로 바로 체험 가능
+PYTHONPATH=src python -m classroom_sim.stage \
+    --personas personas/class_6_3.json --lesson lessons/ratio_and_rate.md \
+    --backend mock          # 실제 AI 반응은 --backend anthropic (ANTHROPIC_API_KEY 필요)
+
+# 웹판 — 게더타운풍 도트 교실 (브라우저에서 http://localhost:8000)
+pip install -r requirements.txt
+PYTHONPATH=src python -m classroom_sim.web --port 8000
+```
+
+수업 중 명령: 일반 텍스트(전체 발화), `@이름 질문`(지목), `/판서`, `/활동`, `/모둠 4인`, `/모둠활동`, `/순회 이름`, `/칭찬`, `/주의`, `/시간 10분`, `/돌발`, `/상태`, `/종료`(사후 리포트 + 수업 분석 생성). 도트 교실의 픽셀아트 에셋 제작 가이드는 [docs/asset_request.md](docs/asset_request.md)를 참고하세요 (에셋이 없어도 임시 스프라이트로 동작).
+
 ### CLI 옵션
 
 | 옵션 | 설명 |

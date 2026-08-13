@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>보이는 교실 — 수업 시뮬레이션</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-screen="setup">
+
+<!-- ══════════════ 1. 셋업 화면 ══════════════ -->
+<section id="screen-setup" class="screen">
+  <div class="setup-box">
+    <h1 class="pixel-title">보이는 교실</h1>
+    <p class="subtitle">학생 페르소나를 무대로 데려와 수업을 진행합니다.</p>
+
+    <label class="field">
+      <span>학급</span>
+      <select id="sel-classroom"></select>
+    </label>
+    <label class="field">
+      <span>단원 / 수업안</span>
+      <select id="sel-lesson"></select>
+    </label>
+    <label class="field">
+      <span>백엔드</span>
+      <select id="sel-backend">
+        <option value="mock">mock — API 키 없이 동작 (데모·테스트)</option>
+        <option value="anthropic">anthropic — Claude API 사용</option>
+      </select>
+    </label>
+
+    <button id="btn-start" class="btn-primary">수업 시작</button>
+    <p id="setup-error" class="error" hidden></p>
+    <p class="notice">※ 시뮬레이션 결과이며 실제 학생의 예측·평가·선발에 사용할 수 없습니다.</p>
+  </div>
+</section>
+
+<!-- ══════════════ 2. 교실 무대 ══════════════ -->
+<section id="screen-stage" class="screen">
+
+  <!-- 상단 바 -->
+  <header id="topbar">
+    <div class="tb-left">
+      <span class="tb-class" id="tb-class">—</span>
+      <span class="tb-lesson" id="tb-lesson"></span>
+    </div>
+    <div class="tb-stats">
+      <span class="stat"><b id="tb-minute">0</b><i>분</i></span>
+      <span class="stat"><b id="tb-phase">도입</b><i>국면</i></span>
+      <span class="stat"><b id="tb-turn">0</b><i>턴</i></span>
+      <span class="stat gauge-stat">
+        <span class="mini-gauge"><i class="g-comp" id="avg-comp-bar"></i></span>
+        <em id="avg-comp">60</em><i>이해</i>
+      </span>
+      <span class="stat gauge-stat">
+        <span class="mini-gauge"><i class="g-int" id="avg-int-bar"></i></span>
+        <em id="avg-int">60</em><i>흥미</i>
+      </span>
+      <span class="stat gauge-stat">
+        <span class="mini-gauge"><i class="g-foc" id="avg-foc-bar"></i></span>
+        <em id="avg-foc">70</em><i>집중</i>
+      </span>
+      <span class="stat backend-tag" id="tb-backend">mock</span>
+    </div>
+  </header>
+
+  <!-- 무대 + 사이드 패널 -->
+  <main id="stage-main">
+    <div id="canvas-wrap">
+      <canvas id="classroom" width="336" height="256"></canvas>
+      <div id="busy" hidden><span class="dots"></span>학생들이 반응하는 중...</div>
+    </div>
+
+    <aside id="side-panel">
+      <div id="detail-empty" class="side-empty">
+        <p>학생을 클릭하면<br>상세 카드가 열립니다.</p>
+      </div>
+      <article id="detail-card" hidden>
+        <header class="dc-head">
+          <span class="dc-avatar"><canvas id="dc-portrait" width="32" height="48"></canvas></span>
+          <span>
+            <b id="dc-name">—</b>
+            <small id="dc-meta">—</small>
+          </span>
+          <button id="dc-close" title="닫기">×</button>
+        </header>
+        <div class="dc-gauges">
+          <div class="gauge-row"><label>이해도</label><span class="bar"><i class="g-comp" id="dc-comp-bar"></i></span><em id="dc-comp">0</em></div>
+          <div class="gauge-row"><label>흥미</label><span class="bar"><i class="g-int" id="dc-int-bar"></i></span><em id="dc-int">0</em></div>
+          <div class="gauge-row"><label>집중</label><span class="bar"><i class="g-foc" id="dc-foc-bar"></i></span><em id="dc-foc">0</em></div>
+        </div>
+        <p class="dc-now"><span class="emo" id="dc-emo">😐</span><span id="dc-action">—</span></p>
+        <dl id="dc-persona"></dl>
+        <div class="dc-actions">
+          <button data-cmd="@">지목</button>
+          <button data-cmd="/순회 ">순회</button>
+          <button data-cmd="/칭찬 ">칭찬</button>
+        </div>
+      </article>
+    </aside>
+  </main>
+
+  <!-- 하단 진행 패널 -->
+  <footer id="progress-panel">
+    <div id="transcript" aria-live="polite"></div>
+    <div id="composer">
+      <div id="cmd-bar">
+        <button data-cmd="@" title="특정 학생 지목">@ 지목</button>
+        <button data-cmd="/판서 ">판서</button>
+        <button data-cmd="/활동 ">활동</button>
+        <button data-cmd="/모둠 4인" title="4인 모둠 자동 편성">모둠</button>
+        <button data-cmd="/모둠활동 ">모둠활동</button>
+        <button data-cmd="/순회 ">순회</button>
+        <button data-cmd="/칭찬 ">칭찬</button>
+        <span class="cmd-group">
+          <select id="incident-card" title="돌발 카드 선택">
+            <option value="">무작위</option>
+            <option>친구갈등</option>
+            <option>기기고장</option>
+            <option>방송소음</option>
+            <option>조퇴요청</option>
+            <option>벌레소동</option>
+            <option>복도소란</option>
+          </select>
+          <button data-cmd="incident">돌발</button>
+        </span>
+        <button data-cmd="/시간 5분">시간 +5분</button>
+        <button data-cmd="/상태">상태</button>
+        <button data-cmd="/종료" class="danger">종료</button>
+      </div>
+      <div id="input-row">
+        <input id="teacher-input" type="text" autocomplete="off"
+               placeholder="수업할 말을 입력하세요.  (@이름 지목,  /판서 …,  /활동 …,  /종료)">
+        <button id="btn-send" class="btn-primary">보내기</button>
+      </div>
+    </div>
+  </footer>
+</section>
+
+<!-- ══════════════ 3. 종료 화면 ══════════════ -->
+<section id="screen-report" class="screen">
+  <div class="report-box">
+    <div class="report-actions">
+      <button id="btn-download" class="btn-primary">전사 JSON 내려받기</button>
+      <button id="btn-download-md">리포트 마크다운 저장</button>
+      <button id="btn-restart">새 수업</button>
+    </div>
+    <article id="report-body" class="md"></article>
+  </div>
+</section>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
