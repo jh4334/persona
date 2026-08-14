@@ -51,6 +51,11 @@ PYTHONPATH=src python -m classroom_sim.stage \
 # 웹판 — 게더타운풍 도트 교실 (브라우저에서 http://localhost:8000)
 pip install -r requirements.txt
 PYTHONPATH=src python -m classroom_sim.web --port 8000
+
+# 📱 휴대폰에서 접속하려면: PC와 휴대폰을 같은 Wi-Fi에 두고
+PYTHONPATH=src python -m classroom_sim.web --port 8000 --host 0.0.0.0
+# 기동 시 출력되는 http://<PC의 IP>:8000 주소를 휴대폰 브라우저에서 열기
+# (화면이 자동으로 모바일 레이아웃으로 전환됩니다)
 ```
 
 수업 중 명령: 일반 텍스트(전체 발화), `@이름 질문`(지목), `/판서`, `/활동`, `/모둠 4인`, `/모둠활동`, `/순회 이름`, `/칭찬`, `/주의`, `/시간 10분`, `/돌발`, `/상태`, `/종료`(사후 리포트 + 수업 분석 생성). 도트 교실의 픽셀아트 에셋 제작 가이드는 [docs/asset_request.md](docs/asset_request.md)를 참고하세요 (에셋이 없어도 임시 스프라이트로 동작).
