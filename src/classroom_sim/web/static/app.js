@@ -248,6 +248,9 @@ const Stage = {
     window.addEventListener('resize', Stage.resize);
     Stage.layout();
     Stage.resize();
+    // 첫 배치 직후 CSS가 확정된 표시 크기로 한 번 더 맞춘다 (모바일 해상도 선택용)
+    requestAnimationFrame(() => Stage.resize());
+    window.addEventListener('orientationchange', () => setTimeout(Stage.resize, 250));
     const loop = () => { Stage.draw(); Stage.rafId = requestAnimationFrame(loop); };
     Stage.rafId = requestAnimationFrame(loop);
   },
@@ -273,8 +276,9 @@ const Stage = {
     if (!wrap) return;
     let s;
     if (isMobile()) {
-      // 모바일: 표시 크기는 CSS(가로 100%)가 정하므로, 화면 밀도에 맞는 내부 해상도만 고른다.
-      const cssW = Math.max(160, wrap.clientWidth);
+      // 모바일: 표시 크기는 CSS(max-width/max-height)가 정하므로 화면 밀도에 맞는 내부 해상도만 고른다.
+      // 내부 해상도는 항상 표시 크기보다 크게 유지되어 CSS 제약이 흔들리지 않는다.
+      const cssW = Math.max(160, Stage.canvas.clientWidth || wrap.clientWidth);
       const dpr = clamp(window.devicePixelRatio || 1, 1, 3);
       s = Math.round(cssW * dpr / Stage.W);
     } else {
@@ -449,19 +453,19 @@ const Stage = {
     ctx.clearRect(0, 0, Stage.canvas.width, Stage.canvas.height);
     ctx.drawImage(Stage.buf, 0, 0, Stage.W * S, Stage.H * S);
 
-    // 캔버스가 CSS로 축소되어 표시될 때(모바일) 실제 CSS 픽셀 대비 배율.
-    // 데스크톱은 1:1로 표시되므로 항상 1 → 기존 글자 크기가 그대로 유지된다.
+    // 캔버스 내부 픽셀 ÷ 실제 표시 CSS 픽셀. 모바일에서 글자 최소 크기를 보정하는 데만 쓴다.
+    // 데스크톱은 0으로 두어 아래 글자 크기 계산이 기존 식과 완전히 동일해진다(회귀 방지).
     const shownW = Stage.canvas.clientWidth || Stage.canvas.width;
-    Stage.K = Stage.canvas.width / Math.max(1, shownW);
+    Stage.K = isMobile() ? Stage.canvas.width / Math.max(1, shownW) : 0;
 
     Stage.drawOverlay(ctx, S, t);
   },
 
   /** 텍스트류(이름·말풍선·이모지·판서)는 화면 해상도로 그려야 읽을 수 있다 */
   drawOverlay(ctx, S, t) {
-    const K = Stage.K || 1;
+    const K = Stage.K || 0;
     // 표시 기준(CSS 픽셀) 최소 글자 크기를 보장한다.
-    // 데스크톱(K=1)에서는 base*S가 항상 커서 기존 값과 동일하고, 모바일에서만 글자가 커진다.
+    // 데스크톱은 K=0이라 항상 base*S(기존 식)가 그대로 쓰이고, 모바일에서만 글자가 커진다.
     const F = (base, minCss) => Math.round(Math.max(base * S, minCss * K));
     // 판서 내용 (칠판 위)
     if (App.boardText) {
@@ -537,7 +541,8 @@ const Stage = {
 function drawBubble(ctx, S, K, x, yBottom, text) {
   const fs = Math.max(clamp(Math.round(3.6 * S), 11, 18), Math.round(10.5 * K));
   ctx.font = `${fs}px ${CANVAS_FONT}`;
-  const maxW = Math.max(clamp(110 * S, 140, 300), 150 * K);
+  // 모바일에서는 글자를 키우는 대신 폭도 넓히되, 무대를 다 가리지 않도록 캔버스의 60%로 제한
+  const maxW = Math.min(Math.max(clamp(110 * S, 140, 300), 150 * K), ctx.canvas.width * 0.6);
   const lines = wrapLines(ctx, text, maxW);
   const lh = fs * 1.35;
   const w = Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width))) + fs;
@@ -1004,6 +1009,9 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.setAttribute('aria-expanded', on ? 'true' : 'false');
     const box = $('#transcript');
     box.scrollTop = box.scrollHeight;
+    // 펴면 화면이 길어지므로 입력줄이 보이도록 무대 화면을 아래로 붙인다
+    const sc = $('#screen-stage');
+    if (on) requestAnimationFrame(() => { sc.scrollTop = sc.scrollHeight; });
   });
 
   $('#btn-download').addEventListener('click', async () => {

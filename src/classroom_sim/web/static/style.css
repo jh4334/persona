@@ -359,16 +359,17 @@ button.danger { color: var(--danger); }
   .tb-stats { gap: 12px; flex-wrap: nowrap; margin-left: auto; }
   .tb-class { font-size: 13px; }
 
-  /* 캔버스: 가로 꽉 차게, 픽셀 비율 유지 */
-  #stage-main { display: block; min-height: 0; }
-  #canvas-wrap { padding: 6px 0; }
+  /* 캔버스: 가로 꽉 차게, 픽셀 비율 유지
+     (width를 100%로 고정하면 max-height가 걸릴 때 세로만 눌려 비율이 깨진다.
+      내부 해상도는 항상 화면보다 크게 잡으므로 max-width/max-height만으로 꽉 찬다.) */
+  #stage-main { display: flex; flex: 0 0 auto; min-height: 0; }
+  #canvas-wrap { flex: 1; width: 100%; padding: 6px 0; }
   #classroom {
     display: block;
-    width: 100%;
+    width: auto;
     height: auto;
     max-width: 100%;
-    max-height: 46vh;      /* 세로 화면에서 캔버스가 화면을 독차지하지 않게 */
-    border-left: none; border-right: none;
+    max-height: 50vh;      /* 세로 화면에서 캔버스가 화면을 독차지하지 않게 */
     box-shadow: 0 4px 12px rgba(0, 0, 0, .5);
   }
   #busy { bottom: 8px; font-size: 11px; padding: 6px 10px; }
@@ -407,9 +408,18 @@ button.danger { color: var(--danger); }
   .gauge-row { font-size: 12px; margin-bottom: 6px; }
   .gauge-row .bar { height: 12px; }
   #dc-persona { font-size: 12.5px; }
+  /* 시트를 스크롤하지 않아도 행동 버튼이 항상 보이게 아래에 붙인다 */
+  .dc-actions {
+    position: sticky; bottom: 0;
+    background: var(--panel);
+    padding: 8px 0 2px;
+    box-shadow: 0 -8px 10px -6px var(--panel);
+  }
   .dc-actions button { min-height: 44px; font-size: 13px; }
 
   /* --- 하단 진행 패널 --- */
+  /* 캔버스·명령바·입력줄을 채우고 남는 세로 공간은 전사 로그가 흡수한다
+     (명령바와 입력줄 사이에 빈 공간이 생기지 않게) */
   #progress-panel {
     display: flex; flex-direction: column; gap: 4px;
     flex: 1 0 auto;
@@ -418,6 +428,7 @@ button.danger { color: var(--danger); }
   }
 
   #transcript {
+    flex: 1 0 auto;
     height: 22vh;              /* 접힘(기본) */
     min-height: 92px;
     max-height: none;
@@ -427,12 +438,13 @@ button.danger { color: var(--danger); }
 
   #tr-toggle {
     display: block; width: 100%;
+    flex: 0 0 auto;
     min-height: 28px; padding: 3px;
     font-size: 11px; letter-spacing: 4px;
     color: var(--text-dim); box-shadow: none;
   }
 
-  #composer { flex: 1 0 auto; gap: 4px; }
+  #composer { flex: 0 0 auto; gap: 4px; }
 
   /* 명령바: 가로 스크롤 한 줄 */
   #cmd-bar {
@@ -459,7 +471,6 @@ button.danger { color: var(--danger); }
   /* 입력줄: 하단 고정 + iOS 안전영역 */
   #input-row {
     position: sticky; bottom: 0; z-index: 15;
-    margin-top: auto;
     background: var(--panel);
     padding: 6px 0 calc(8px + env(safe-area-inset-bottom));
   }
@@ -477,8 +488,8 @@ button.danger { color: var(--danger); }
 
 /* 가로로 누운 폰: 캔버스 높이를 더 줄여 로그·입력줄이 보이게 한다 */
 @media (max-width: 950px) and (max-height: 500px) and (orientation: landscape) {
-  #classroom { max-height: 62vh; }
+  #classroom { max-height: 58vh; }
   #transcript { height: 26vh; min-height: 72px; }
   body.tr-expanded #transcript { height: 46vh; }
-  #side-panel { max-height: 82vh; }
+  #side-panel { max-height: 84vh; }
 }
