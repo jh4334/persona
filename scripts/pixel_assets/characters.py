@@ -15,100 +15,98 @@ from pixel_assets.palette import (
     RED,
     TRANSPARENT,
     WHITE,
-    WOOD,
-    WOOD_DARK,
     YELLOW,
 )
 
 
 def _draw_hair(draw: ImageDraw.ImageDraw, spec: CharacterSpec) -> None:
-    left = 11 if spec.small else 10
-    right = 20 if spec.small else 21
-    draw.rectangle((left, 9, right, 13), fill=spec.hair)
-    draw.rectangle((left - 1, 11, left + 1, 18), fill=spec.hair)
-    draw.rectangle((right - 1, 11, right + 1, 18), fill=spec.hair)
+    left = 9 if spec.small else 8
+    right = 22 if spec.small else 23
+    draw.rectangle((left, 8, right, 13), fill=spec.hair)
+    draw.rectangle((left - 1, 11, left + 1, 20), fill=spec.hair)
+    draw.rectangle((right - 1, 11, right + 1, 20), fill=spec.hair)
     style: HairStyle = spec.hair_style
     match style:
         case "teacher":
-            draw.rectangle((11, 7, 20, 11), fill=spec.hair)
-            draw.rectangle((19, 5, 23, 9), fill=spec.hair)
-            draw.rectangle((12, 7, 15, 8), fill=HAIR_GOLD)
+            draw.rectangle((9, 6, 22, 11), fill=spec.hair)
+            draw.rectangle((20, 4, 25, 9), fill=spec.hair)
+            draw.rectangle((10, 6, 14, 7), fill=HAIR_GOLD)
         case "short":
-            draw.rectangle((9, 10, 22, 14), fill=spec.hair)
-            draw.point((12, 9), fill=spec.accent)
-            draw.point((18, 9), fill=spec.accent)
+            draw.rectangle((7, 9, 24, 14), fill=spec.hair)
+            draw.point((11, 8), fill=spec.accent)
+            draw.point((20, 8), fill=spec.accent)
         case "parted":
-            draw.polygon(((9, 12), (12, 8), (22, 9), (22, 14), (16, 12), (13, 16)), fill=spec.hair)
-            draw.line((15, 9, 20, 10), fill=HAIR_GOLD)
+            draw.polygon(((7, 13), (11, 7), (24, 8), (24, 15), (17, 12), (12, 17)), fill=spec.hair)
+            draw.line((16, 8, 22, 9), fill=HAIR_GOLD)
         case "bob":
-            draw.rectangle((8, 12, 10, 23), fill=spec.hair)
-            draw.rectangle((21, 12, 23, 23), fill=spec.hair)
-            draw.rectangle((10, 8, 21, 12), fill=spec.hair)
+            draw.rectangle((6, 12, 9, 25), fill=spec.hair)
+            draw.rectangle((22, 12, 25, 25), fill=spec.hair)
+            draw.rectangle((8, 7, 23, 13), fill=spec.hair)
         case "fringe":
-            draw.rectangle((9, 9, 22, 14), fill=spec.hair)
-            draw.polygon(((10, 13), (21, 13), (20, 20), (16, 17), (13, 21)), fill=spec.hair)
+            draw.rectangle((7, 8, 24, 14), fill=spec.hair)
+            draw.polygon(((8, 13), (23, 13), (21, 20), (17, 17), (12, 21)), fill=spec.hair)
         case "twintail":
-            draw.rectangle((9, 9, 22, 14), fill=spec.hair)
-            draw.rectangle((5, 13, 9, 22), fill=spec.hair)
-            draw.rectangle((22, 13, 26, 22), fill=spec.hair)
-            draw.point((8, 14), fill=spec.accent)
-            draw.point((23, 14), fill=spec.accent)
+            draw.rectangle((7, 8, 24, 14), fill=spec.hair)
+            draw.rectangle((3, 13, 8, 23), fill=spec.hair)
+            draw.rectangle((23, 13, 28, 23), fill=spec.hair)
+            draw.rectangle((6, 13, 8, 15), fill=spec.accent)
+            draw.rectangle((23, 13, 25, 15), fill=spec.accent)
         case "cap":
-            draw.rectangle((9, 10, 22, 14), fill=spec.hair)
-            draw.rectangle((8, 7, 22, 11), fill=spec.shirt)
-            draw.rectangle((6, 9, 10, 11), fill=spec.shirt)
-            draw.rectangle((10, 7, 17, 8), fill=spec.accent)
+            draw.rectangle((7, 10, 24, 15), fill=spec.hair)
+            draw.rectangle((7, 6, 24, 11), fill=spec.shirt)
+            draw.rectangle((4, 9, 9, 11), fill=spec.shirt)
+            draw.rectangle((10, 6, 18, 7), fill=spec.accent)
         case "long":
-            draw.rectangle((8, 11, 10, 29), fill=spec.hair)
-            draw.rectangle((21, 11, 23, 29), fill=spec.hair)
-            draw.rectangle((10, 8, 21, 13), fill=spec.hair)
-            draw.line((9, 22, 9, 28), fill=spec.accent)
+            draw.rectangle((6, 11, 9, 31), fill=spec.hair)
+            draw.rectangle((22, 11, 25, 31), fill=spec.hair)
+            draw.rectangle((8, 7, 23, 13), fill=spec.hair)
+            draw.line((7, 23, 7, 29), fill=spec.accent)
         case "crop":
-            draw.rectangle((10, 9, 21, 13), fill=spec.hair)
-            draw.point((9, 12), fill=spec.hair)
-            draw.point((22, 12), fill=spec.hair)
-            draw.point((13, 9), fill=HAIR_GOLD)
+            draw.rectangle((8, 8, 23, 13), fill=spec.hair)
+            draw.point((7, 12), fill=spec.hair)
+            draw.point((24, 12), fill=spec.hair)
+            draw.line((11, 8, 14, 8), fill=HAIR_GOLD)
         case "pin":
-            draw.rectangle((9, 9, 22, 13), fill=spec.hair)
-            draw.rectangle((8, 13, 10, 22), fill=spec.hair)
-            draw.rectangle((21, 13, 23, 22), fill=spec.hair)
-            draw.rectangle((20, 12, 23, 13), fill=spec.accent)
+            draw.rectangle((7, 8, 24, 13), fill=spec.hair)
+            draw.rectangle((6, 13, 9, 24), fill=spec.hair)
+            draw.rectangle((22, 13, 25, 24), fill=spec.hair)
+            draw.rectangle((21, 11, 25, 13), fill=spec.accent)
         case "curly":
-            for box in ((9, 9, 13, 13), (14, 7, 19, 12), (19, 9, 23, 14), (8, 14, 11, 18), (21, 14, 24, 18)):
+            for box in ((7, 8, 12, 13), (13, 6, 19, 12), (19, 8, 25, 14), (6, 13, 10, 19), (22, 13, 26, 19)):
                 draw.rectangle(box, fill=spec.hair)
-            draw.point((16, 8), fill=spec.accent)
+            draw.point((16, 7), fill=spec.accent)
         case "small":
-            draw.rectangle((10, 10, 21, 14), fill=spec.hair)
-            draw.rectangle((11, 8, 18, 10), fill=spec.hair)
+            draw.rectangle((8, 9, 23, 14), fill=spec.hair)
+            draw.rectangle((10, 7, 19, 9), fill=spec.hair)
         case "hood":
-            draw.rectangle((8, 8, 23, 16), fill=spec.shirt)
-            draw.rectangle((9, 11, 10, 21), fill=spec.shirt)
-            draw.rectangle((21, 11, 22, 21), fill=spec.shirt)
-            draw.rectangle((11, 9, 20, 12), fill=spec.hair)
+            draw.rectangle((6, 7, 25, 17), fill=spec.shirt)
+            draw.rectangle((7, 11, 9, 23), fill=spec.shirt)
+            draw.rectangle((22, 11, 24, 23), fill=spec.shirt)
+            draw.rectangle((9, 8, 22, 12), fill=spec.hair)
         case unreachable:
             assert_never(unreachable)
 
 
 def _draw_head(draw: ImageDraw.ImageDraw, spec: CharacterSpec) -> None:
-    left = 11 if spec.small else 10
-    right = 20 if spec.small else 21
+    left = 10 if spec.small else 9
+    right = 21 if spec.small else 22
     if spec.hooded:
-        draw.rectangle((8, 12, 23, 24), fill=spec.shirt)
-        draw.rectangle((8, 15, 9, 22), fill=spec.accent)
-        draw.rectangle((22, 15, 23, 22), fill=spec.accent)
-    draw.rectangle((left, 11, right, 22), fill=spec.skin)
-    draw.rectangle((left - 1, 15, left, 19), fill=spec.skin)
-    draw.rectangle((right, 15, right + 1, 19), fill=spec.skin)
+        draw.rectangle((6, 10, 25, 25), fill=spec.shirt)
+        draw.rectangle((6, 14, 8, 22), fill=spec.accent)
+        draw.rectangle((23, 14, 25, 22), fill=spec.accent)
+    draw.rectangle((left, 10, right, 24), fill=spec.skin)
+    draw.rectangle((left - 1, 15, left, 20), fill=spec.skin)
+    draw.rectangle((right, 15, right + 1, 20), fill=spec.skin)
     _draw_hair(draw, spec)
-    eye_y = 18
-    draw.point((13, eye_y), fill=DARK)
-    draw.point((18, eye_y), fill=DARK)
+    eye_y = 19
+    draw.line((12, eye_y, 13, eye_y), fill=DARK)
+    draw.line((18, eye_y, 19, eye_y), fill=DARK)
     style: HairStyle = spec.hair_style
     match style:
         case "bob":
-            draw.rectangle((11, 16, 15, 19), outline=BLUE_DARK)
-            draw.rectangle((17, 16, 21, 19), outline=BLUE_DARK)
-            draw.line((15, 17, 17, 17), fill=BLUE_DARK)
+            draw.rectangle((10, 17, 14, 21), outline=BLUE_DARK)
+            draw.rectangle((17, 17, 21, 21), outline=BLUE_DARK)
+            draw.line((14, 18, 17, 18), fill=BLUE_DARK)
         case "fringe":
             draw.rectangle((11, 16, 15, 19), fill=spec.hair)
         case "teacher" | "short" | "parted" | "twintail" | "cap" | "long" | "crop" | "pin" | "curly" | "small" | "hood":
@@ -116,11 +114,11 @@ def _draw_head(draw: ImageDraw.ImageDraw, spec: CharacterSpec) -> None:
         case unreachable:
             assert_never(unreachable)
     if spec.smile:
-        draw.line((14, 21, 17, 21), fill=DARK)
-        draw.point((13, 20), fill=PINK)
-        draw.point((18, 20), fill=PINK)
+        draw.line((14, 22, 17, 23), fill=DARK)
+        draw.point((12, 22), fill=PINK)
+        draw.point((19, 22), fill=PINK)
     else:
-        draw.line((15, 21, 16, 21), fill=DARK)
+        draw.line((14, 23, 17, 23), fill=DARK)
 
 
 def _draw_accessory(draw: ImageDraw.ImageDraw, spec: CharacterSpec, body_y: int) -> None:
@@ -162,7 +160,7 @@ def _draw_accessory(draw: ImageDraw.ImageDraw, spec: CharacterSpec, body_y: int)
 
 
 def _draw_seated_body(draw: ImageDraw.ImageDraw, spec: CharacterSpec, breath: int) -> None:
-    base_y = (26 if spec.small else 24) + breath
+    base_y = (28 if spec.small else 26) + breath
     pose: Pose = spec.pose
     match pose:
         case "neutral":
@@ -179,12 +177,8 @@ def _draw_seated_body(draw: ImageDraw.ImageDraw, spec: CharacterSpec, breath: in
             body_y, left, right, left_arm_y, right_arm_y = base_y + 1, 9, 23, 5, 2
         case unreachable:
             assert_never(unreachable)
-    draw.rectangle((6, 26, 8, 44), fill=WOOD_DARK)
-    draw.rectangle((23, 26, 25, 44), fill=WOOD_DARK)
-    draw.rectangle((7, 27, 24, 38), fill=WOOD)
-    draw.rectangle((7, 37, 24, 41), fill=WOOD_DARK)
-    draw.polygon(((left, body_y), (right, body_y), (21, body_y + 13), (10, body_y + 13)), fill=spec.shirt)
-    draw.line((11, body_y + 1, 20, body_y + 1), fill=spec.accent)
+    draw.polygon(((left, body_y), (right, body_y), (21, body_y + 12), (10, body_y + 12)), fill=spec.shirt)
+    draw.line((10, body_y + 1, 21, body_y + 1), fill=spec.accent, width=2)
     draw.rectangle((left - 2, body_y + left_arm_y, left + 1, body_y + left_arm_y + 6), fill=spec.shirt)
     draw.rectangle((right - 1, body_y + right_arm_y, right + 2, body_y + right_arm_y + 6), fill=spec.shirt)
     draw.rectangle((left - 1, body_y + left_arm_y + 5, left + 1, body_y + left_arm_y + 7), fill=spec.skin)
@@ -199,14 +193,12 @@ def _draw_seated_body(draw: ImageDraw.ImageDraw, spec: CharacterSpec, breath: in
             pass
         case unreachable:
             assert_never(unreachable)
-    draw.polygon(((10, 36), (15, 36), (13, 41), (6, 41)), fill=BLUE_DARK)
-    draw.polygon(((17, 36), (22, 36), (26, 41), (19, 41)), fill=BLUE_DARK)
-    draw.rectangle((6, 40, 11, 44), fill=BLUE_DARK)
-    draw.rectangle((21, 40, 26, 44), fill=BLUE_DARK)
-    draw.rectangle((5, 43, 12, 46), fill=DARK)
-    draw.rectangle((20, 43, 27, 46), fill=DARK)
-    draw.line((6, 46, 12, 46), fill=WHITE)
-    draw.line((20, 46, 26, 46), fill=WHITE)
+    draw.polygon(((10, body_y + 10), (15, body_y + 10), (13, 42), (6, 42)), fill=BLUE_DARK)
+    draw.polygon(((17, body_y + 10), (22, body_y + 10), (26, 42), (19, 42)), fill=BLUE_DARK)
+    draw.rectangle((5, 41, 12, 45), fill=DARK)
+    draw.rectangle((20, 41, 27, 45), fill=DARK)
+    draw.line((6, 45, 12, 45), fill=WHITE)
+    draw.line((20, 45, 26, 45), fill=WHITE)
     _draw_accessory(draw, spec, body_y)
 
 

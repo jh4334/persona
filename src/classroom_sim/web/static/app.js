@@ -15,9 +15,9 @@
 
 const COLS = 4;                       // 책상 열 수
 const LOGICAL_W = 336;                // 논리 캔버스 가로 (픽셀아트 원본 해상도)
-const DESK_W = 44, DESK_H = 14;
+const DESK_W = 40, DESK_H = 40;
 const COL_X = [48, 128, 208, 288];    // 각 열의 중심 x
-const ROW_Y0 = 110, ROW_GAP = 54;     // 첫 줄 책상 윗변 y, 줄 간격
+const ROW_Y0 = 110, ROW_GAP = 88;     // 첫 줄 책상 윗변 y, 줄 간격
 const SPRITE_W = 32, SPRITE_H = 48;
 const WALL_H = 46;                    // 앞쪽 벽 높이
 
@@ -26,10 +26,10 @@ const BUBBLE_MS = 6000;               // 말풍선 유지 시간
 const CANVAS_FONT = '"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif';
 
 // 감정 → 이모지 (에셋 emotes.png가 있으면 시트 인덱스를 우선 사용)
-const EMOTION_ORDER = ['평온', '들뜸', '위축', '불안', '지루함', '몰입', '졸림', '손듦'];
+const EMOTION_ORDER = ['손듦', '졸림', '혼란', '몰입', '불안', '수다', '지루함', '흥분'];
 const EMOTION_EMOJI = {
   '평온': '😌', '들뜸': '✨', '위축': '😟', '불안': '😰', '지루함': '🥱',
-  '몰입': '🤩', '졸림': '😴', '손듦': '🙋', '피곤': '😴', '흥분': '✨',
+  '몰입': '🤩', '졸림': '😴', '손듦': '🙋', '수다': '💬', '피곤': '😴', '흥분': '✨',
   '짜증': '😠', '슬픔': '😢', '자신감': '😎', '혼란': '😕',
 };
 
@@ -268,7 +268,7 @@ const Stage = {
     const wrap = $('#canvas-wrap');
     if (!wrap) return;
     const availW = wrap.clientWidth - 20, availH = wrap.clientHeight - 20;
-    const s = Math.max(2, Math.floor(Math.min(availW / Stage.W, availH / Stage.H)));
+    const s = Math.max(1, Math.floor(Math.min(availW / Stage.W, availH / Stage.H)));
     Stage.scale = clamp(s, 2, 6);
     Stage.canvas.width = Stage.W * Stage.scale;
     Stage.canvas.height = Stage.H * Stage.scale;
@@ -445,10 +445,10 @@ const Stage = {
     // 판서 내용 (칠판 위)
     if (App.boardText) {
       ctx.save();
-      ctx.beginPath(); ctx.rect(96 * S, 10 * S, 144 * S, 24 * S); ctx.clip();
+      ctx.beginPath(); ctx.rect(96 * S, 10 * S, 184 * S, 24 * S); ctx.clip();
       ctx.font = `${Math.round(3.4 * S)}px ${CANVAS_FONT}`;
       ctx.fillStyle = '#eef4ea'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      wrapText(ctx, App.boardText, 168 * S, 12 * S, 138 * S, 4.2 * S, 3);
+      wrapText(ctx, App.boardText, 188 * S, 12 * S, 178 * S, 4.2 * S, 3);
       ctx.restore();
     }
     // 교사 이름표
@@ -463,8 +463,8 @@ const Stage = {
       const s = Stage.seat(i);
       const st = App.states[stu.id] || {};
       // 이름표
-      const ny = (s.deskTop + DESK_H + 18) * S;
-      ctx.font = `${Math.round(3.4 * S)}px ${CANVAS_FONT}`;
+      const ny = (s.deskTop + 25) * S;
+      ctx.font = `${Math.round(4.8 * S)}px ${CANVAS_FONT}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
       ctx.fillStyle = App.selected === stu.id ? '#ffe066' : '#fdf6e6';
       ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.lineWidth = Math.max(2, S * 0.7);
