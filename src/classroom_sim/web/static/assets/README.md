@@ -5,9 +5,9 @@
 | 파일명 | 크기 | 내용 |
 |---|---|---|
 | `tiles.png` | 32×32 타일 | 바닥·벽·창문·소품 타일시트 |
-| `blackboard.png` | 152×34 | 칠판 (좌상단 기준 x=92, y=6에 배치) |
-| `desk_student.png` | 44×14 | 학생 책상 1개 |
-| `desk_teacher.png` | 56×18 | 교탁 |
+| `blackboard.png` | 192×64 | 칠판 (좌상단 기준 x=92, y=6에 배치) |
+| `desk_student.png` | 40×40 | 학생 책상+의자 세트 |
+| `desk_teacher.png` | 64×48 | 교탁 |
 | `char_teacher.png` | 64×48 | 교사 (32×48 × 2프레임 idle, 가로 배치) |
 | `char_s01.png` ~ `char_s12.png` | 64×48 | 학생 개별 (32×48 × 2프레임 idle, 가로 배치) — 좌석 순서 = personas JSON의 students 순서 |
 | `emotes.png` | 128×16 | 감정 아이콘 16×16 × 8종, 순서: 평온·들뜸·위축·불안·지루함·몰입·졸림·손듦 |
