@@ -74,6 +74,10 @@ const App = {
 const $ = (sel) => document.querySelector(sel);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
+/** 모바일 모드 여부 — style.css의 미디어 쿼리와 동일한 조건을 쓴다 */
+const MOBILE_MQ = '(max-width: 820px), (max-width: 950px) and (max-height: 500px) and (orientation: landscape)';
+const isMobile = () => window.matchMedia(MOBILE_MQ).matches;
+
 /* ══════════════════════════ 2. API ══════════════════════════ */
 
 async function api(path, options) {
@@ -267,9 +271,17 @@ const Stage = {
   resize() {
     const wrap = $('#canvas-wrap');
     if (!wrap) return;
-    const availW = wrap.clientWidth - 20, availH = wrap.clientHeight - 20;
-    const s = Math.max(1, Math.floor(Math.min(availW / Stage.W, availH / Stage.H)));
-    Stage.scale = clamp(s, 2, 6);
+    let s;
+    if (isMobile()) {
+      // 모바일: 표시 크기는 CSS(가로 100%)가 정하므로, 화면 밀도에 맞는 내부 해상도만 고른다.
+      const cssW = Math.max(160, wrap.clientWidth);
+      const dpr = clamp(window.devicePixelRatio || 1, 1, 3);
+      s = Math.round(cssW * dpr / Stage.W);
+    } else {
+      const availW = wrap.clientWidth - 20, availH = wrap.clientHeight - 20;
+      s = Math.floor(Math.min(availW / Stage.W, availH / Stage.H));
+    }
+    Stage.scale = clamp(Math.max(1, s), 2, 6);
     Stage.canvas.width = Stage.W * Stage.scale;
     Stage.canvas.height = Stage.H * Stage.scale;
   },
@@ -437,34 +449,47 @@ const Stage = {
     ctx.clearRect(0, 0, Stage.canvas.width, Stage.canvas.height);
     ctx.drawImage(Stage.buf, 0, 0, Stage.W * S, Stage.H * S);
 
+    // 캔버스가 CSS로 축소되어 표시될 때(모바일) 실제 CSS 픽셀 대비 배율.
+    // 데스크톱은 1:1로 표시되므로 항상 1 → 기존 글자 크기가 그대로 유지된다.
+    const shownW = Stage.canvas.clientWidth || Stage.canvas.width;
+    Stage.K = Stage.canvas.width / Math.max(1, shownW);
+
     Stage.drawOverlay(ctx, S, t);
   },
 
   /** 텍스트류(이름·말풍선·이모지·판서)는 화면 해상도로 그려야 읽을 수 있다 */
   drawOverlay(ctx, S, t) {
+    const K = Stage.K || 1;
+    // 표시 기준(CSS 픽셀) 최소 글자 크기를 보장한다.
+    // 데스크톱(K=1)에서는 base*S가 항상 커서 기존 값과 동일하고, 모바일에서만 글자가 커진다.
+    const F = (base, minCss) => Math.round(Math.max(base * S, minCss * K));
     // 판서 내용 (칠판 위)
     if (App.boardText) {
+      const bf = F(3.4, 8);
       ctx.save();
       ctx.beginPath(); ctx.rect(96 * S, 10 * S, 184 * S, 24 * S); ctx.clip();
-      ctx.font = `${Math.round(3.4 * S)}px ${CANVAS_FONT}`;
+      ctx.font = `${bf}px ${CANVAS_FONT}`;
       ctx.fillStyle = '#eef4ea'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      wrapText(ctx, App.boardText, 188 * S, 12 * S, 178 * S, 4.2 * S, 3);
+      wrapText(ctx, App.boardText, 188 * S, 12 * S, 178 * S, Math.max(4.2 * S, bf * 1.24), 3);
       ctx.restore();
     }
     // 교사 이름표
-    ctx.font = `${Math.round(3.2 * S)}px ${CANVAS_FONT}`;
+    const tf = F(3.2, 8);
+    ctx.font = `${tf}px ${CANVAS_FONT}`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    const tw = Math.max(32 * S, ctx.measureText('교사').width + tf);
+    const th = Math.max(6 * S, tf * 1.4);
     ctx.fillStyle = 'rgba(0,0,0,.35)';
-    ctx.fillRect(112 * S, 60 * S, 32 * S, 6 * S);
+    ctx.fillRect(128 * S - tw / 2, 60 * S, tw, th);
     ctx.fillStyle = '#ffe9b0';
-    ctx.fillText('교사', 128 * S, 60.6 * S);
+    ctx.fillText('교사', 128 * S, 60 * S + (th - tf) / 2);
 
     App.students.forEach((stu, i) => {
       const s = Stage.seat(i);
       const st = App.states[stu.id] || {};
       // 이름표
       const ny = (s.deskTop + 25) * S;
-      ctx.font = `${Math.round(4.8 * S)}px ${CANVAS_FONT}`;
+      ctx.font = `${F(4.8, 10.5)}px ${CANVAS_FONT}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
       ctx.fillStyle = App.selected === stu.id ? '#ffe066' : '#fdf6e6';
       ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.lineWidth = Math.max(2, S * 0.7);
@@ -476,16 +501,17 @@ const Stage = {
       const key = Stage.emotionKey(st);
       const idx = EMOTION_ORDER.indexOf(key);
       if (Assets.images.emotes && idx >= 0) {
+        const es = Math.max(12 * S, 22 * K);
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(Assets.images.emotes, idx * 16, 0, 16, 16, ex - 6 * S, ey - 8 * S, 12 * S, 12 * S);
+        ctx.drawImage(Assets.images.emotes, idx * 16, 0, 16, 16, ex - es / 2, ey - es * 0.67, es, es);
       } else {
-        ctx.font = `${Math.round(6 * S)}px ${CANVAS_FONT}`;
+        ctx.font = `${F(6, 12)}px ${CANVAS_FONT}`;
         ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
         ctx.fillText(EMOTION_EMOJI[key] || '😐', ex - 3 * S, ey + 2 * S);
       }
       // 집중 급락 시 zzz
       if (st.focus !== undefined && st.focus < 25 && Math.floor(t / 700) % 2 === 0) {
-        ctx.font = `${Math.round(3.6 * S)}px ${CANVAS_FONT}`;
+        ctx.font = `${F(3.6, 8)}px ${CANVAS_FONT}`;
         ctx.fillStyle = '#cfd8ff'; ctx.textAlign = 'left';
         ctx.fillText('z z', (s.cx - 18) * S, (s.spriteY + 4) * S);
       }
@@ -500,17 +526,18 @@ const Stage = {
       const s = Stage.seat(i);
       const age = t - b.t0;
       ctx.globalAlpha = age > BUBBLE_MS - 1200 ? clamp((BUBBLE_MS - age) / 1200, 0, 1) : 1;
-      drawBubble(ctx, S, s.cx * S, (s.spriteY - 10) * S, b.text);
+      drawBubble(ctx, S, K, s.cx * S, (s.spriteY - 10) * S, b.text);
       ctx.globalAlpha = 1;
     });
   },
 };
 
-/** 픽셀풍 말풍선 (꼬리 포함). x=꼬리 중심, yBottom=꼬리 끝 y */
-function drawBubble(ctx, S, x, yBottom, text) {
-  const fs = clamp(Math.round(3.6 * S), 11, 18);
+/** 픽셀풍 말풍선 (꼬리 포함). x=꼬리 중심, yBottom=꼬리 끝 y
+    K = 캔버스 내부 픽셀 / 표시 CSS 픽셀 (데스크톱 1, 모바일 >1) */
+function drawBubble(ctx, S, K, x, yBottom, text) {
+  const fs = Math.max(clamp(Math.round(3.6 * S), 11, 18), Math.round(10.5 * K));
   ctx.font = `${fs}px ${CANVAS_FONT}`;
-  const maxW = clamp(110 * S, 140, 300);
+  const maxW = Math.max(clamp(110 * S, 140, 300), 150 * K);
   const lines = wrapLines(ctx, text, maxW);
   const lh = fs * 1.35;
   const w = Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width))) + fs;
@@ -614,7 +641,8 @@ const UI = {
       UI.refreshTop();
       UI.addSystemLine(`수업을 시작합니다 — ${App.className} · ${App.lessonTitle}`);
       UI.addSystemLine('입력 예)  여러분, 오늘은 비에 대해 배웁니다.   /  @윤지우 기준량이 뭘까?   /  /판서 3 : 5');
-      $('#teacher-input').focus();
+      // 모바일에서는 시작하자마자 키보드가 올라와 무대를 가리므로 포커스하지 않는다
+      if (!isMobile()) $('#teacher-input').focus();
     } catch (e) {
       UI.setupError('수업을 시작하지 못했습니다.\n' + e.message);
     } finally {
@@ -721,16 +749,24 @@ const UI = {
   },
 
   /* ── 학생 상세 카드 ── */
+  /** 모바일 바텀시트 열기/닫기 (데스크톱에서는 CSS상 아무 영향 없음) */
+  setSheet(open) {
+    document.body.classList.toggle('sheet-open', !!open);
+  },
+
   selectStudent(id) {
     App.selected = id;
     if (!id) {
       $('#detail-card').hidden = true;
       $('#detail-empty').hidden = false;
+      UI.setSheet(false);
       return;
     }
     $('#detail-empty').hidden = true;
     $('#detail-card').hidden = false;
     UI.renderDetail(id);
+    UI.setSheet(true);
+    if (isMobile()) $('#side-panel').scrollTop = 0;
   },
 
   renderDetail(id) {
@@ -951,9 +987,24 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.querySelectorAll('#cmd-bar button, .dc-actions button').forEach((b) => {
-    b.addEventListener('click', () => insertCommand(b.dataset.cmd));
+    b.addEventListener('click', () => {
+      insertCommand(b.dataset.cmd);
+      // 모바일: 바텀시트에서 명령을 고르면 시트를 닫아 입력줄을 보여준다 (선택 표시는 유지)
+      if (isMobile() && b.closest('.dc-actions')) UI.setSheet(false);
+    });
   });
   $('#dc-close').addEventListener('click', () => UI.selectStudent(null));
+  $('#sheet-backdrop').addEventListener('click', () => UI.selectStudent(null));
+
+  // 전사 로그 접기/펴기 (모바일 전용 버튼)
+  $('#tr-toggle').addEventListener('click', () => {
+    const on = document.body.classList.toggle('tr-expanded');
+    const btn = $('#tr-toggle');
+    btn.textContent = on ? '▼' : '▲';
+    btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+    const box = $('#transcript');
+    box.scrollTop = box.scrollHeight;
+  });
 
   $('#btn-download').addEventListener('click', async () => {
     try {

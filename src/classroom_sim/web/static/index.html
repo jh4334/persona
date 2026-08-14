@@ -74,6 +74,8 @@
     </div>
 
     <aside id="side-panel">
+      <!-- 모바일 바텀시트 손잡이 (데스크톱에서는 숨김) -->
+      <div class="sheet-grip" aria-hidden="true"></div>
       <div id="detail-empty" class="side-empty">
         <p>학생을 클릭하면<br>상세 카드가 열립니다.</p>
       </div>
@@ -105,6 +107,9 @@
   <!-- 하단 진행 패널 -->
   <footer id="progress-panel">
     <div id="transcript" aria-live="polite"></div>
+    <!-- 전사 로그 접기/펴기 (모바일 전용) -->
+    <button id="tr-toggle" type="button" aria-expanded="false" aria-controls="transcript"
+            title="전사 로그 펴기/접기">▲</button>
     <div id="composer">
       <div id="cmd-bar">
         <button data-cmd="@" title="특정 학생 지목">@ 지목</button>
@@ -137,6 +142,9 @@
       </div>
     </div>
   </footer>
+
+  <!-- 모바일 바텀시트 뒷배경 (바깥 탭으로 닫기) -->
+  <div id="sheet-backdrop"></div>
 </section>
 
 <!-- ══════════════ 3. 종료 화면 ══════════════ -->

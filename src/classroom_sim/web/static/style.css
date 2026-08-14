@@ -273,6 +273,11 @@ button.danger { color: var(--danger); }
   letter-spacing: 2px; margin: 8px 0 4px; border-top: 1px dashed #2c3145; padding-top: 5px;
 }
 
+/* 전사 로그 토글·바텀시트 부품은 데스크톱에서 존재하지 않는다 */
+#tr-toggle { display: none; }
+.sheet-grip { display: none; }
+#sheet-backdrop { display: none; }
+
 #composer { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 #cmd-bar { display: flex; flex-wrap: wrap; gap: 4px; overflow-y: auto; }
 #cmd-bar button { padding: 5px 7px; font-size: 11px; }
@@ -315,10 +320,165 @@ button.danger { color: var(--danger); }
 .md tbody tr:nth-child(even) { background: rgba(255, 255, 255, .022); }
 .md strong { color: #fff; }
 
-/* 좁은 화면 대응 */
-@media (max-width: 900px) {
-  #stage-main { grid-template-columns: minmax(0, 1fr); }
-  #side-panel { display: none; }
-  #progress-panel { grid-template-columns: minmax(0, 1fr); height: 250px; }
-  #transcript { max-height: 110px; }
+/* ============================================================
+   4. 모바일 대응 (폭 ≤ 820px)
+   - 데스크톱(> 820px)은 위 규칙 그대로 유지된다.
+   - 무대는 세로 스택: 상단바 → 캔버스 → 전사 로그 → 명령바 → 입력줄
+   - 학생 상세는 우측 패널 대신 하단에서 올라오는 바텀시트
+   ============================================================ */
+@media (max-width: 820px),
+       (max-width: 950px) and (max-height: 500px) and (orientation: landscape) {
+
+  /* 공통: 터치 타깃 · 더블탭 확대 방지 · iOS 입력 확대 방지(16px 이상) */
+  button, select, input[type="text"], canvas { touch-action: manipulation; }
+  select, input[type="text"] { font-size: 16px; padding: 11px 10px; }
+
+  /* --- 1. 셋업 --- */
+  #screen-setup { align-items: flex-start; padding: 16px 12px 28px; overflow-y: auto; }
+  .setup-box { width: 100%; padding: 22px 18px 18px; }
+  .pixel-title { font-size: 26px; letter-spacing: 2px; }
+  .subtitle { margin-bottom: 18px; }
+  #btn-start { min-height: 50px; }
+
+  /* --- 2. 무대: 세로 스택(화면 전체가 하나의 스크롤 영역) --- */
+  body[data-screen="stage"] #screen-stage {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 상단바: 학급명 + 분·국면·턴만 남기고 축약 */
+  #topbar {
+    position: sticky; top: 0; z-index: 20;
+    padding: 6px 10px; gap: 8px; flex-wrap: nowrap;
+  }
+  .tb-lesson, .gauge-stat, .backend-tag { display: none; }
+  .tb-stats { gap: 12px; flex-wrap: nowrap; margin-left: auto; }
+  .tb-class { font-size: 13px; }
+
+  /* 캔버스: 가로 꽉 차게, 픽셀 비율 유지 */
+  #stage-main { display: block; min-height: 0; }
+  #canvas-wrap { padding: 6px 0; }
+  #classroom {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-width: 100%;
+    max-height: 46vh;      /* 세로 화면에서 캔버스가 화면을 독차지하지 않게 */
+    border-left: none; border-right: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, .5);
+  }
+  #busy { bottom: 8px; font-size: 11px; padding: 6px 10px; }
+
+  /* --- 학생 상세: 바텀시트 --- */
+  #sheet-backdrop {
+    display: none;
+    position: fixed; inset: 0; z-index: 39;
+    background: rgba(0, 0, 0, .5);
+  }
+  body.sheet-open #sheet-backdrop { display: block; }
+
+  #side-panel {
+    display: block;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    max-height: 60vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    border-left: none;
+    border-top: 2px solid var(--line);
+    padding: 6px 12px calc(12px + env(safe-area-inset-bottom));
+    box-shadow: 0 -6px 20px rgba(0, 0, 0, .55);
+    transform: translateY(102%);
+    transition: transform .18s ease-out;
+    pointer-events: none;
+  }
+  body.sheet-open #side-panel { transform: translateY(0); pointer-events: auto; }
+
+  .sheet-grip {
+    display: block; width: 44px; height: 5px; margin: 4px auto 10px;
+    background: var(--line-soft);
+  }
+  #detail-empty { display: none; }              /* 모바일에서는 안내 문구 숨김 */
+  .dc-head b { font-size: 16px; }
+  #dc-close { min-width: 40px; min-height: 40px; font-size: 16px; }
+  .gauge-row { font-size: 12px; margin-bottom: 6px; }
+  .gauge-row .bar { height: 12px; }
+  #dc-persona { font-size: 12.5px; }
+  .dc-actions button { min-height: 44px; font-size: 13px; }
+
+  /* --- 하단 진행 패널 --- */
+  #progress-panel {
+    display: flex; flex-direction: column; gap: 4px;
+    flex: 1 0 auto;
+    height: auto;
+    padding: 6px 8px 0;
+  }
+
+  #transcript {
+    height: 22vh;              /* 접힘(기본) */
+    min-height: 92px;
+    max-height: none;
+    font-size: 13px;
+  }
+  body.tr-expanded #transcript { height: 45vh; }
+
+  #tr-toggle {
+    display: block; width: 100%;
+    min-height: 28px; padding: 3px;
+    font-size: 11px; letter-spacing: 4px;
+    color: var(--text-dim); box-shadow: none;
+  }
+
+  #composer { flex: 1 0 auto; gap: 4px; }
+
+  /* 명령바: 가로 스크롤 한 줄 */
+  #cmd-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 6px;
+    padding-bottom: 4px;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+  #cmd-bar::-webkit-scrollbar { height: 4px; }
+  #cmd-bar::-webkit-scrollbar-track { background: var(--line); }
+  #cmd-bar::-webkit-scrollbar-thumb { background: var(--line-soft); }
+  #cmd-bar button {
+    flex: 0 0 auto;
+    min-width: 40px; min-height: 40px;
+    padding: 6px 12px; font-size: 12px;
+    white-space: nowrap;
+  }
+  .cmd-group { flex: 0 0 auto; }
+  .cmd-group select { min-height: 40px; font-size: 14px; padding: 4px 6px; }
+
+  /* 입력줄: 하단 고정 + iOS 안전영역 */
+  #input-row {
+    position: sticky; bottom: 0; z-index: 15;
+    margin-top: auto;
+    background: var(--panel);
+    padding: 6px 0 calc(8px + env(safe-area-inset-bottom));
+  }
+  #input-row input { min-height: 46px; }
+  #input-row button { min-width: 76px; min-height: 46px; padding: 9px 12px; }
+
+  /* --- 3. 리포트 --- */
+  #screen-report { padding: 14px 10px 40px; }
+  .report-actions { gap: 6px; }
+  .report-actions button { flex: 1 1 auto; min-height: 42px; }
+  .md { padding: 16px 14px; font-size: 13px; }
+  .md h1 { font-size: 19px; }
+  .md h2 { font-size: 15.5px; }
+}
+
+/* 가로로 누운 폰: 캔버스 높이를 더 줄여 로그·입력줄이 보이게 한다 */
+@media (max-width: 950px) and (max-height: 500px) and (orientation: landscape) {
+  #classroom { max-height: 62vh; }
+  #transcript { height: 26vh; min-height: 72px; }
+  body.tr-expanded #transcript { height: 46vh; }
+  #side-panel { max-height: 82vh; }
 }
