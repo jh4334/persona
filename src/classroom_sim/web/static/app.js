@@ -23,6 +23,7 @@ const WALL_H = 46;                    // 앞쪽 벽 높이
 
 const ASSET_BASE = '/static/assets/';
 const BUBBLE_MS = 6000;               // 말풍선 유지 시간
+const TRANSCRIPT_MAX = 400;           // 전사 로그 DOM 상한 (전체 기록은 서버가 보관)
 const CANVAS_FONT = '"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif';
 
 // 감정 → 이모지 (에셋 emotes.png가 있으면 시트 인덱스를 우선 사용)
@@ -257,15 +258,21 @@ const Stage = {
     Stage.ctx = Stage.canvas.getContext('2d');
     Stage.buf = document.createElement('canvas');
     Stage.bctx = Stage.buf.getContext('2d');
-    Stage.canvas.addEventListener('click', Stage.onClick);
-    window.addEventListener('resize', Stage.resize);
+    // 새 수업으로 init이 다시 불려도 전역 리스너·rAF 루프는 한 번만 등록한다
+    if (!Stage._wired) {
+      Stage._wired = true;
+      Stage.canvas.addEventListener('click', Stage.onClick);
+      window.addEventListener('resize', Stage.resize);
+      window.addEventListener('orientationchange', () => setTimeout(Stage.resize, 250));
+      // 탭이 다시 보이면 강제로 한 프레임 그린다 (숨김 중 상태 변화 반영)
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) Stage.dirty = true; });
+      const loop = () => { Stage.draw(); Stage.rafId = requestAnimationFrame(loop); };
+      Stage.rafId = requestAnimationFrame(loop);
+    }
     Stage.layout();
     Stage.resize();
     // 첫 배치 직후 CSS가 확정된 표시 크기로 한 번 더 맞춘다 (모바일 해상도 선택용)
     requestAnimationFrame(() => Stage.resize());
-    window.addEventListener('orientationchange', () => setTimeout(Stage.resize, 250));
-    const loop = () => { Stage.draw(); Stage.rafId = requestAnimationFrame(loop); };
-    Stage.rafId = requestAnimationFrame(loop);
   },
 
   /** 학생 수에 맞춰 논리 캔버스 높이를 정한다 (4열 기준) */
@@ -275,6 +282,7 @@ const Stage = {
     Stage.H = ROW_Y0 + ROW_GAP * (rows - 1) + DESK_H + 32;
     Stage.buf.width = Stage.W;
     Stage.buf.height = Stage.H;
+    Stage.dirty = true;
   },
 
   seat(i) {
@@ -301,6 +309,7 @@ const Stage = {
     Stage.scale = clamp(Math.max(1, s), 2, 6);
     Stage.canvas.width = Stage.W * Stage.scale;
     Stage.canvas.height = Stage.H * Stage.scale;
+    Stage.dirty = true;
   },
 
   onClick(ev) {
@@ -438,6 +447,14 @@ const Stage = {
     if (!g || document.body.dataset.screen !== 'stage') return;   // 무대 화면일 때만 그린다
     const t = performance.now();
     const frameIdle = Math.floor(t / 520) % 2;   // 2프레임 idle
+    // 변한 게 없으면 그리지 않는다 — idle은 520ms, zzz는 700ms에 한 번만 바뀌므로
+    // 말풍선이 없을 때는 사실상 초당 2~3회만 그린다 (모바일 배터리·발열 절감)
+    const zFrame = Math.floor(t / 700) % 2;
+    const hasBubble = App.bubbles.some((b) => t - b.t0 < BUBBLE_MS);
+    if (!Stage.dirty && !hasBubble && !Stage._hadBubble
+        && frameIdle === Stage._idleF && zFrame === Stage._zF) return;
+    Stage.dirty = false;
+    Stage._idleF = frameIdle; Stage._zF = zFrame; Stage._hadBubble = hasBubble;
 
     g.imageSmoothingEnabled = false;
     g.clearRect(0, 0, Stage.W, Stage.H);
@@ -770,7 +787,8 @@ const UI = {
     div.className = 'line ' + cls + (String(text).indexOf('\n') >= 0 ? ' pre' : '');
     div.innerHTML = (who ? `<span class="who">${esc(who)}</span>` : '') + esc(text);
     box.appendChild(div);
-    box.scrollTop = box.scrollHeight;
+    UI.trimTranscript(box);
+    UI.scheduleScroll(box);
   },
   addSystemLine(text) { UI.addLine('system', '', text); },
   addTurnMark() {
@@ -779,7 +797,32 @@ const UI = {
     div.className = 'line turnmark';
     div.textContent = `— ${App.turn}턴 · ${App.minute}분 · ${App.phase} —`;
     box.appendChild(div);
-    box.scrollTop = box.scrollHeight;
+    UI.trimTranscript(box);
+    UI.scheduleScroll(box);
+  },
+
+  /** 긴 수업에서 DOM이 무한히 늘지 않도록 오래된 줄부터 접는다 (전체 기록은 서버 보관) */
+  trimTranscript(box) {
+    let over = box.childElementCount - TRANSCRIPT_MAX;
+    if (over <= 0) return;
+    if (!box.firstElementChild.classList.contains('trim-note')) {
+      const n = document.createElement('div');
+      n.className = 'line system trim-note';
+      n.textContent = '⋯ 오래된 기록은 화면에서 접었습니다 (종료 리포트·전사 JSON에는 전부 포함됩니다)';
+      box.insertBefore(n, box.firstElementChild);
+      over += 1;
+    }
+    while (over-- > 0 && box.children.length > 1) box.children[1].remove();
+  },
+
+  /** 여러 줄이 한꺼번에 추가돼도 스크롤(강제 리플로우)은 프레임당 1회만 */
+  scheduleScroll(box) {
+    if (UI._scrollPending) return;
+    UI._scrollPending = true;
+    requestAnimationFrame(() => {
+      UI._scrollPending = false;
+      box.scrollTop = box.scrollHeight;
+    });
   },
 
   nameOf(actor) {
@@ -813,6 +856,7 @@ const UI = {
   },
 
   applyTurn(r) {
+    Stage.dirty = true;   // 게이지·감정·판서가 바뀌므로 다음 프레임에 반드시 그린다
     App.turn = r.turn !== undefined ? r.turn : App.turn + 1;
     App.minute = r.minute !== undefined ? r.minute : App.minute;
     App.phase = r.phase || App.phase;
@@ -874,6 +918,7 @@ const UI = {
 
   selectStudent(id) {
     App.selected = id;
+    Stage.dirty = true;
     if (!id) {
       $('#detail-card').hidden = true;
       $('#detail-empty').hidden = false;
