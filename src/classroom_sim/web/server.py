@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -94,20 +96,45 @@ def _make_session(classroom: Classroom, lesson_text: str, backend_name: str, see
 # ---------------------------------------------------------------------------
 
 
+MAX_SESSIONS = 30          # 동시 보관 세션 상한 (프로토타입 서버 보호)
+SESSION_IDLE_TTL = 3 * 3600  # 마지막 사용 후 3시간 지나면 회수
+
+
 class SessionRecord:
     def __init__(self, session: Any, classroom: Classroom, meta: dict) -> None:
         self.session = session
         self.classroom = classroom
         self.meta = meta
+        self.lock = threading.Lock()      # 턴 처리 직렬화 (동시 요청 경쟁 방지)
+        self.last_used = time.time()
+
+    def touch(self) -> None:
+        self.last_used = time.time()
 
 
 SESSIONS: dict[str, SessionRecord] = {}
+_SESSIONS_GUARD = threading.Lock()
+
+
+def _evict_stale() -> None:
+    """TTL이 지났거나 상한을 넘긴 세션을 회수한다 (오래 쉰 것부터)."""
+    now = time.time()
+    with _SESSIONS_GUARD:
+        for sid in [s for s, r in SESSIONS.items() if now - r.last_used > SESSION_IDLE_TTL]:
+            SESSIONS.pop(sid, None)
+        while len(SESSIONS) >= MAX_SESSIONS:
+            oldest = min(SESSIONS, key=lambda s: SESSIONS[s].last_used)
+            SESSIONS.pop(oldest, None)
 
 
 def _get(session_id: str) -> SessionRecord:
     rec = SESSIONS.get(session_id)
     if rec is None:
-        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+        raise HTTPException(
+            status_code=404,
+            detail="세션을 찾을 수 없습니다. 오래 자리를 비웠다면 세션이 회수되었을 수 있습니다 — 새 수업을 시작해 주세요.",
+        )
+    rec.touch()
     return rec
 
 
@@ -233,6 +260,7 @@ def create_session(req: CreateSessionReq) -> dict:
         raise HTTPException(status_code=400, detail=f"학급 로드 실패: {exc}") from exc
     lesson_text = lpath.read_text(encoding="utf-8")
 
+    _evict_stale()
     session, backend_used = _make_session(classroom, lesson_text, req.backend, req.seed)
     sid = uuid.uuid4().hex[:12]
     SESSIONS[sid] = SessionRecord(
@@ -268,10 +296,15 @@ def _title_of(path: Path) -> str:
 @app.post("/api/sessions/{session_id}/turn")
 def take_turn(session_id: str, req: TurnReq) -> dict:
     rec = _get(session_id)
+    if not rec.lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="이전 입력이 아직 처리 중입니다. 잠시 후 다시 보내 주세요.")
     try:
         result = rec.session.turn(req.input)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"턴 처리 실패: {exc}") from exc
+    finally:
+        rec.touch()
+        rec.lock.release()
     return _serialize(result)
 
 
@@ -290,10 +323,15 @@ def get_transcript(session_id: str) -> list[dict]:
 @app.post("/api/sessions/{session_id}/end")
 def end_session(session_id: str) -> dict:
     rec = _get(session_id)
+    if not rec.lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="이전 입력이 아직 처리 중입니다. 잠시 후 다시 시도해 주세요.")
     try:
         report = rec.session.end()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"종료 처리 실패: {exc}") from exc
+    finally:
+        rec.touch()
+        rec.lock.release()
     return {"report_markdown": report}
 
 
