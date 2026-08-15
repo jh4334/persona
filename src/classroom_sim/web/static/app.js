@@ -635,12 +635,37 @@ const UI = {
     } catch (e) {
       UI.setupError('목록을 불러오지 못했습니다: ' + e.message);
     }
+    $('#sel-backend').addEventListener('change', UI.updateBackendNote);
+    UI.updateBackendNote();
+  },
+
+  /** 선택한 백엔드가 무엇을 뜻하는지 셋업 화면에서 바로 설명한다 */
+  updateBackendNote() {
+    const notes = {
+      mock: '연습 모드 — 학생 반응이 규칙 기반이라 단순합니다. 준비 없이 화면·명령을 익히기에 좋아요.',
+      codex: 'ChatGPT 구독으로 실제 AI 반응을 생성합니다. 서버 PC에서 codex login이 되어 있어야 하고, 턴당 수십 초 걸릴 수 있어요.',
+      anthropic: 'Claude API로 실제 AI 반응을 생성합니다. ANTHROPIC_API_KEY가 필요하며 사용량만큼 과금됩니다.',
+    };
+    $('#backend-note').textContent = notes[$('#sel-backend').value] || '';
   },
 
   setupError(msg) {
     const el = $('#setup-error');
     el.textContent = msg;
     el.hidden = !msg;
+  },
+
+  /** 첫 수업 1회만 보여주는 3줄 길잡이 */
+  firstRunIntro() {
+    try {
+      if (localStorage.getItem('cs_intro_done')) return;
+      localStorage.setItem('cs_intro_done', '1');
+    } catch (e) { return; }
+    UI.addLine('system', '처음이신가요?', [
+      '① 아래 입력창에 수업할 말을 그대로 적고 Enter — 학생들이 듣고 반응합니다.',
+      '② 무대의 학생을 클릭하면 상세 카드가 열리고, 카드의 [지목] 버튼으로 바로 물어볼 수 있어요.',
+      '③ 명령이 궁금하면 [도움말] 버튼을, 수업을 마치면 /종료 를 입력해 사후 리포트를 받으세요.',
+    ].join('\n'));
   },
 
   /** 진행 중 세션 기억 (새로고침 복구용) */
@@ -756,6 +781,10 @@ const UI = {
       UI.refreshTop();
       UI.addSystemLine(`수업을 시작합니다 — ${App.className} · ${App.lessonTitle}`);
       UI.addSystemLine('입력 예)  여러분, 오늘은 비에 대해 배웁니다.   /  @윤지우 기준량이 뭘까?   /  /판서 3 : 5');
+      if (App.backend === 'mock') {
+        UI.addSystemLine('※ 지금은 연습 모드(mock)라 학생 반응이 규칙 기반으로 단순합니다. 실제 AI 반응을 보려면 새 수업에서 codex 또는 anthropic 백엔드를 선택하세요.');
+      }
+      UI.firstRunIntro();
       UI.remember();
       // 모바일에서는 시작하자마자 키보드가 올라와 무대를 가리므로 포커스하지 않는다
       if (!isMobile()) $('#teacher-input').focus();

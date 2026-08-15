@@ -521,3 +521,8 @@ button.danger { color: var(--danger); }
 /* 리포트 하단 서버 저장 안내 */
 .saved-note { margin-top: 18px; font-size: 12px; opacity: .75; }
 .saved-note code { font-size: 11px; }
+
+/* 셋업 화면 백엔드 설명 */
+.backend-note {
+  margin: -4px 0 10px; font-size: 12px; line-height: 1.55; opacity: .75;
+}
