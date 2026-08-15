@@ -470,6 +470,8 @@ button.danger { color: var(--danger); }
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  #cmd-bar button[data-cmd="/모둠활동 "],
+  #cmd-bar button[data-cmd="/시간 5분"] { font-size: 10px; letter-spacing: -.7px; }
   .cmd-group { display: contents; }
   .cmd-group select {
     min-width: 0; width: 100%; min-height: var(--classroom-touch-sm);
