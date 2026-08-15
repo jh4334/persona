@@ -92,14 +92,26 @@ async function api(path, options) {
       { headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal }, options));
   } catch (e) {
     clearTimeout(timer);
-    if (e.name === 'AbortError') throw new Error('응답이 너무 오래 걸려 요청을 중단했습니다. 네트워크와 서버 상태를 확인한 뒤 다시 시도해 주세요.');
-    throw new Error('서버에 연결하지 못했습니다. 서버가 켜져 있는지 확인해 주세요.');
+    let err;
+    if (e.name === 'AbortError') {
+      err = new Error('응답이 너무 오래 걸려 요청을 중단했습니다.');
+      err.code = 'timeout';
+    } else if (navigator.onLine === false) {
+      err = new Error('인터넷 연결이 끊어져 있습니다. Wi-Fi 연결을 확인해 주세요.');
+      err.code = 'network';
+    } else {
+      err = new Error('서버에 연결하지 못했습니다. 서버가 켜져 있는지 확인해 주세요.');
+      err.code = 'network';
+    }
+    throw err;
   }
   clearTimeout(timer);
   if (!res.ok) {
     let detail = res.status + ' ' + res.statusText;
     try { const j = await res.json(); if (j.detail) detail = j.detail; } catch (e) { /* 무시 */ }
-    throw new Error(detail);
+    const err = new Error(detail);
+    err.code = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -724,20 +736,7 @@ const UI = {
       // 전사 재생: 로그 복원 + 판서·모둠 상태 재구성 (최근 120줄)
       try {
         const t = await Api.transcript(sessionId);
-        const entries = (t || []).slice(-120);
-        entries.forEach((e) => {
-          const kind = e.kind || '', content = e.content || '';
-          if (kind.startsWith('teacher')) {
-            UI.addLine('teacher', '교사', content);
-            const m = content.match(/^(?:판서|칠판에\s*적는다)\s*[:：\-—–]\s*([\s\S]+)/);
-            if (m) App.boardText = m[1].trim();
-          } else if (kind.startsWith('student')) {
-            UI.addLine('student', UI.nameOf(e.actor), content);
-          } else if (kind === 'narration') {
-            UI.addLine('narration', '무대', content);
-          }
-          parseGroups(content);
-        });
+        (t || []).slice(-120).forEach(UI.renderEntry);
       } catch (e) { /* 전사 복원 실패해도 수업은 계속 */ }
       UI.addSystemLine(`수업을 이어서 진행합니다 — ${App.minute}분 경과, ${App.turn}턴째`);
       UI.remember();
@@ -859,6 +858,51 @@ const UI = {
     return s ? s.name : actor;
   },
 
+  /** 서버 전사 엔트리 1건을 로그에 재생 (이어하기·재동기화 공용) */
+  renderEntry(e) {
+    const kind = e.kind || '', content = e.content || '';
+    if (kind.startsWith('teacher')) {
+      UI.addLine('teacher', '교사', content);
+      const m = content.match(/^(?:판서|칠판에\s*적는다)\s*[:：\-—–]\s*([\s\S]+)/);
+      if (m) App.boardText = m[1].trim();
+    } else if (kind.startsWith('student')) {
+      UI.addLine('student', UI.nameOf(e.actor), content);
+    } else if (kind === 'narration') {
+      UI.addLine('narration', '무대', content);
+    }
+    parseGroups(content);
+  },
+
+  /** 타임아웃·409 뒤 서버와 상태를 다시 맞춘다.
+      서버가 그 사이 입력을 처리했으면 놓친 전사를 재생하고, 아니면 입력을 되돌려 준다. */
+  async resyncState(pendingText, input) {
+    try {
+      const before = App.turn;
+      const snap = await Api.state(App.sessionId);
+      App.turn = snap.turn || App.turn;
+      App.minute = snap.minute !== undefined ? snap.minute : App.minute;
+      App.phase = snap.phase || App.phase;
+      App.ended = !!snap.ended;
+      (snap.students || []).forEach((s) => { App.states[s.id] = pickState(s); });
+      Stage.dirty = true;
+      UI.refreshTop();
+      if (App.turn > before) {
+        try {
+          const t = await Api.transcript(App.sessionId);
+          (t || []).filter((e) => (e.turn || 0) > before).forEach(UI.renderEntry);
+        } catch (e2) { /* 전사 없이도 게이지는 맞춰졌다 */ }
+        UI.addSystemLine(`알고 보니 서버가 입력을 처리해 두었어요 — 상태를 ${App.turn}턴으로 맞췄습니다.`);
+      } else {
+        UI.addSystemLine('서버에 반영되지 않은 입력입니다. 아래에 남겨 두었으니 다시 보내 주세요.');
+        if (input && !input.value && pendingText) input.value = pendingText;
+      }
+      if (App.ended) await UI.showReport(null);
+    } catch (e2) {
+      UI.addSystemLine('상태를 다시 맞추지 못했습니다: ' + e2.message);
+      if (input && !input.value && pendingText) input.value = pendingText;
+    }
+  },
+
   /* ── 명령 도움말 (서버 왕복 없이 즉시 표시) ── */
   showHelp() {
     UI.addLine('system', '도움말', [
@@ -941,8 +985,16 @@ const UI = {
       if (r.notice) UI.addSystemLine(r.notice);
       if (r.ended) await UI.showReport(r.report_markdown, r.report_saved_path);
     } catch (e) {
-      UI.addLine('system', '오류', e.message + '  (입력한 내용은 입력창에 남겨 두었어요)');
-      if (!input.value) input.value = text;   // 쓰던 내용 유실 방지
+      if (e.code === 'timeout') {
+        UI.addLine('system', '오류', e.message + '  서버가 그 사이 처리를 마쳤을 수 있어 상태를 확인합니다…');
+        await UI.resyncState(text, input);
+      } else if (e.code === 409) {
+        UI.addLine('system', '안내', e.message);
+        setTimeout(() => { if (!App.busy && !App.ended) UI.resyncState(text, input); }, 5000);
+      } else {
+        UI.addLine('system', '오류', e.message + '  (입력한 내용은 입력창에 남겨 두었어요)');
+        if (!input.value) input.value = text;   // 쓰던 내용 유실 방지
+      }
     } finally {
       UI.setBusy(false);
       input.focus();
@@ -1305,6 +1357,14 @@ function download(filename, content, type) {
 document.addEventListener('DOMContentLoaded', () => {
   UI.initSetup();
   UI.offerResume();
+
+  // 네트워크 단절을 즉시 알린다 (전송 실패 후에야 아는 것보다 빠르게)
+  window.addEventListener('offline', () => {
+    if (document.body.dataset.screen === 'stage') UI.addSystemLine('📴 인터넷 연결이 끊어졌습니다. 연결이 돌아오면 이어서 진행할 수 있어요.');
+  });
+  window.addEventListener('online', () => {
+    if (document.body.dataset.screen === 'stage') UI.addSystemLine('✅ 연결이 복구되었습니다.');
+  });
   $('#btn-start').addEventListener('click', UI.start);
 
   $('#btn-send').addEventListener('click', () => UI.send());
