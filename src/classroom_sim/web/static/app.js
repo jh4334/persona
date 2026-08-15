@@ -613,6 +613,86 @@ const UI = {
     el.hidden = !msg;
   },
 
+  /** 진행 중 세션 기억 (새로고침 복구용) */
+  remember() {
+    try {
+      localStorage.setItem('cs_session', JSON.stringify({
+        id: App.sessionId, cls: App.className, lesson: App.lessonTitle,
+        backend: App.backend, t: Date.now(),
+      }));
+    } catch (e) { /* 프라이빗 모드 등 — 복구 기능만 포기 */ }
+  },
+  forget() { try { localStorage.removeItem('cs_session'); } catch (e) { /* 무시 */ } },
+
+  /** 저장된 세션이 서버에 살아있으면 이어하기 배너를 보여준다 */
+  async offerResume() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem('cs_session') || 'null'); } catch (e) { saved = null; }
+    if (!saved || !saved.id || Date.now() - (saved.t || 0) > 3 * 3600 * 1000) return;
+    let snap;
+    try { snap = await Api.state(saved.id); } catch (e) { UI.forget(); return; }
+    if (snap.ended) { UI.forget(); return; }
+    $('#resume-info').textContent =
+      `${snap.class_name || saved.cls} · ${snap.lesson_title || saved.lesson} (${snap.minute}분 진행)`;
+    $('#resume-banner').hidden = false;
+    $('#btn-resume').onclick = () => UI.resume(saved.id, snap);
+    $('#btn-discard').onclick = () => { UI.forget(); $('#resume-banner').hidden = true; };
+  },
+
+  /** 서버 상태 + 전사를 다시 불러와 무대를 복원한다 */
+  async resume(sessionId, snap) {
+    const btn = $('#btn-resume');
+    btn.disabled = true; btn.textContent = '교실을 복원하는 중...';
+    try {
+      App.sessionId = sessionId;
+      App.className = snap.class_name || '';
+      App.lessonTitle = snap.lesson_title || '';
+      App.backend = snap.backend || 'mock';
+      App.students = snap.students || [];
+      App.seatOf = {};
+      App.students.forEach((s, i) => { App.seatOf[s.id] = i; });
+      App.personas = {};
+      (snap.personas || []).forEach((p) => { App.personas[p.id] = p; });
+      App.states = {};
+      App.students.forEach((s) => { App.states[s.id] = pickState(s); });
+      App.turn = snap.turn || 0; App.minute = snap.minute || 0;
+      App.phase = snap.phase || '도입'; App.ended = !!snap.ended;
+
+      await Assets.loadAll(App.students.length);
+      document.body.dataset.screen = 'stage';
+      $('#tb-class').textContent = App.className;
+      $('#tb-lesson').textContent = App.lessonTitle;
+      $('#tb-backend').textContent = App.backend;
+      Stage.init();
+      UI.refreshTop();
+
+      // 전사 재생: 로그 복원 + 판서·모둠 상태 재구성 (최근 120줄)
+      try {
+        const t = await Api.transcript(sessionId);
+        const entries = (t || []).slice(-120);
+        entries.forEach((e) => {
+          const kind = e.kind || '', content = e.content || '';
+          if (kind.startsWith('teacher')) {
+            UI.addLine('teacher', '교사', content);
+            const m = content.match(/^(?:판서|칠판에\s*적는다)\s*[:：\-—–]\s*([\s\S]+)/);
+            if (m) App.boardText = m[1].trim();
+          } else if (kind.startsWith('student')) {
+            UI.addLine('student', UI.nameOf(e.actor), content);
+          } else if (kind === 'narration') {
+            UI.addLine('narration', '무대', content);
+          }
+          parseGroups(content);
+        });
+      } catch (e) { /* 전사 복원 실패해도 수업은 계속 */ }
+      UI.addSystemLine(`수업을 이어서 진행합니다 — ${App.minute}분 경과, ${App.turn}턴째`);
+      UI.remember();
+      if (!isMobile()) $('#teacher-input').focus();
+    } catch (e) {
+      UI.setupError('수업을 복원하지 못했습니다: ' + e.message);
+      btn.disabled = false; btn.textContent = '이어하기';
+    }
+  },
+
   async start() {
     UI.setupError('');
     const btn = $('#btn-start');
@@ -646,6 +726,7 @@ const UI = {
       UI.refreshTop();
       UI.addSystemLine(`수업을 시작합니다 — ${App.className} · ${App.lessonTitle}`);
       UI.addSystemLine('입력 예)  여러분, 오늘은 비에 대해 배웁니다.   /  @윤지우 기준량이 뭘까?   /  /판서 3 : 5');
+      UI.remember();
       // 모바일에서는 시작하자마자 키보드가 올라와 무대를 가리므로 포커스하지 않는다
       if (!isMobile()) $('#teacher-input').focus();
     } catch (e) {
@@ -820,6 +901,7 @@ const UI = {
     App.reportMd = report || '# 수업 종료\n\n리포트를 생성하지 못했습니다.';
     $('#report-body').innerHTML = mdToHtml(App.reportMd);
     document.body.dataset.screen = 'report';
+    UI.forget();
   },
 };
 
@@ -984,6 +1066,7 @@ function download(filename, content, type) {
 
 document.addEventListener('DOMContentLoaded', () => {
   UI.initSetup();
+  UI.offerResume();
   $('#btn-start').addEventListener('click', UI.start);
 
   $('#btn-send').addEventListener('click', () => UI.send());

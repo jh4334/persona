@@ -334,7 +334,13 @@ def take_turn(session_id: str, req: TurnReq) -> dict:
 @app.get("/api/sessions/{session_id}/state")
 def get_state(session_id: str) -> dict:
     rec = _get(session_id)
-    return _serialize(rec.session.state_snapshot())
+    snap = _serialize(rec.session.state_snapshot())
+    # 새로고침 복구용 부가 정보 (계약 필드는 유지한 채 덧붙임)
+    snap["personas"] = _persona_cards(rec.classroom)
+    snap["backend"] = rec.meta.get("backend", "")
+    lp = rec.meta.get("lesson_path")
+    snap["lesson_title"] = _title_of(ROOT / lp) if lp else ""
+    return snap
 
 
 @app.get("/api/sessions/{session_id}/transcript")

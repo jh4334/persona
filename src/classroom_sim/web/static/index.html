@@ -32,6 +32,15 @@
     </label>
 
     <button id="btn-start" class="btn-primary">수업 시작</button>
+
+    <div id="resume-banner" class="resume-banner" hidden>
+      <p>📌 진행 중이던 수업이 있습니다: <b id="resume-info"></b></p>
+      <div class="resume-actions">
+        <button id="btn-resume" class="btn-primary">이어하기</button>
+        <button id="btn-discard">버리고 새로 시작</button>
+      </div>
+    </div>
+
     <p id="setup-error" class="error" hidden></p>
     <p class="notice">※ 시뮬레이션 결과이며 실제 학생의 예측·평가·선발에 사용할 수 없습니다.</p>
   </div>

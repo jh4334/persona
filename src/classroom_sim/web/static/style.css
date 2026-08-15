@@ -493,3 +493,12 @@ button.danger { color: var(--danger); }
   body.tr-expanded #transcript { height: 46vh; }
   #side-panel { max-height: 84vh; }
 }
+
+/* ── 이어하기 배너 (새로고침 복구) ── */
+.resume-banner {
+  margin-top: 14px; padding: 12px 14px;
+  border: 1px solid #4a5a3a; border-radius: 8px; background: #232b1e;
+}
+.resume-banner p { margin: 0 0 10px; font-size: 13px; }
+.resume-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.resume-actions button { min-height: 38px; }
