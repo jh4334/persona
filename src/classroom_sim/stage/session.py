@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import random
 import re
+import time
 from datetime import datetime
 
 from ..personas import Classroom, Student
@@ -19,6 +20,10 @@ from .transcript import Transcript, TranscriptEntry
 # 전사가 이 길이를 넘으면 앞부분을 요약으로 접는다.
 FOLD_THRESHOLD = 30
 FOLD_KEEP = 20
+
+# 한 턴의 총 LLM 대기 시간 예산(초). 웹 클라이언트 타임아웃(320초)보다 짧게 잡아
+# 클라이언트가 포기한 뒤에도 서버가 잠금을 쥔 채 도는 시간을 최소화한다.
+TURN_TIME_BUDGET = 290
 
 def _safe_int(value, fallback: int) -> int:
     """감독(LLM) 출력의 숫자 필드를 안전하게 정수로 바꾼다. '3분' 같은 문자열도 허용."""
@@ -254,7 +259,17 @@ class StageSession:
     def turn(self, teacher_input: str) -> TurnResult:
         if self.state.ended:
             return self._result([TurnEvent("무대", "system", "수업이 이미 종료되었습니다.")], ended=True)
+        # 백엔드가 지원하면(codex) 턴 전체에 시간 예산을 건다 — 감독 재시도·학생 3명
+        # 발화가 겹쳐도 턴이 클라이언트 타임아웃을 넘겨 몇 분씩 늘어지지 않게.
+        if hasattr(self.backend, "deadline"):
+            self.backend.deadline = time.monotonic() + TURN_TIME_BUDGET
+        try:
+            return self._turn_impl(teacher_input)
+        finally:
+            if hasattr(self.backend, "deadline"):
+                self.backend.deadline = None
 
+    def _turn_impl(self, teacher_input: str) -> TurnResult:
         action = self._parse(teacher_input)
         kind = action["kind"]
 

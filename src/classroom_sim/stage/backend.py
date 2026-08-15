@@ -16,9 +16,45 @@ import os
 import random
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
+import time
 from typing import Any, Protocol, runtime_checkable
+
+def _kill_process_tree(proc: "subprocess.Popen") -> None:
+    """proc과 그 자손을 모두 강제 종료한다.
+
+    codex 같은 CLI는 하위 프로세스를 띄우므로 직계만 죽이면 고아가 남는다.
+    /proc 자손 순회(리눅스) → killpg(POSIX) → 직접 kill 순으로 겹쳐서 시도한다
+    — killpg가 그룹 전체에 전달되지 않는 샌드박스 환경도 있어서다.
+    """
+    victims: list[int] = []
+
+    def _walk(pid: int) -> None:
+        victims.append(pid)
+        try:
+            with open(f"/proc/{pid}/task/{pid}/children", encoding="ascii") as f:
+                children = f.read().split()
+        except OSError:
+            children = []
+        for c in children:
+            _walk(int(c))
+
+    _walk(proc.pid)  # 부모를 죽이기 전에 자손 목록부터 확보 (죽이면 재부모화되어 못 찾는다)
+
+    if os.name == "posix":
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    for pid in victims:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    proc.kill()
+
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 DEFAULT_DIRECTOR_MODEL = "claude-haiku-4-5"
@@ -257,11 +293,22 @@ class CodexBackend:
         self.codex_bin = codex_bin or os.environ.get(CODEX_BIN_ENV) or "codex"
         self.model = model
         self.timeout = timeout
+        # 턴 단위 시간 예산 (time.monotonic() 기준 마감). 세션이 턴 시작 시 설정하면
+        # 이 마감을 넘겨서까지 codex를 기다리지 않는다 — 클라이언트가 포기한 뒤에도
+        # 서버가 잠금을 쥔 채 몇 분씩 도는 상황을 막는다.
+        self.deadline: float | None = None
 
     # -- 내부 --
 
     def _run(self, prompt: str) -> str:
         """codex exec 1회 실행 후 마지막 메시지 텍스트를 돌려준다."""
+        timeout = float(self.timeout)
+        if self.deadline is not None:
+            remain = self.deadline - time.monotonic()
+            if remain < 5:
+                raise BackendError("이번 턴의 시간 예산을 다 썼습니다. 같은 입력을 한 번 더 보내 주세요.")
+            timeout = min(timeout, remain)
+
         # 코덱스가 이 저장소를 뒤지지 못하도록 빈 임시 디렉터리에서 실행한다.
         workdir = tempfile.mkdtemp(prefix="classroom_sim_codex_")
         out_path = os.path.join(workdir, "last_message.txt")
@@ -279,21 +326,34 @@ class CodexBackend:
         cmd.append(prompt)
 
         try:
-            proc = subprocess.run(  # noqa: S603 — 인자 리스트 고정, 셸 미사용
+            # start_new_session: 타임아웃 시 codex가 띄운 하위 프로세스까지
+            # 프로세스 그룹째 정리하기 위함 (직계만 죽이면 고아가 남는다).
+            proc = subprocess.Popen(  # noqa: S603 — 인자 리스트 고정, 셸 미사용
                 cmd,
                 cwd=workdir,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=self.timeout,
+                start_new_session=True,
             )
         except FileNotFoundError as e:
+            shutil.rmtree(workdir, ignore_errors=True)
             raise BackendError(_CODEX_MISSING_HINT) from e
+
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as e:
+            _kill_process_tree(proc)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
             raise BackendError(
-                f"codex 응답이 {self.timeout}초 안에 오지 않았습니다. "
+                f"codex 응답이 {int(timeout)}초 안에 오지 않았습니다. "
                 "타임아웃을 늘리거나(CodexBackend(timeout=...)) 프롬프트를 줄여 보세요."
             ) from e
         else:
+            proc = subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
             if proc.returncode != 0:
                 raise BackendError(
                     f"codex 실행 실패(종료코드 {proc.returncode}). "
