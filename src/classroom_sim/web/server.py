@@ -194,6 +194,12 @@ def _persona_cards(classroom: Classroom) -> list[dict]:
 app = FastAPI(title="보이는 교실 — classroom_sim web", version="0.5")
 
 
+ALLOWED_BACKENDS = ("mock", "codex", "anthropic")
+MAX_INPUT_CHARS = 2000       # 교사 입력 1회 상한
+MAX_LESSON_BYTES = 200_000   # 수업안 파일 상한 (~200KB)
+MAX_STUDENTS = 40            # 학급 인원 상한
+
+
 class CreateSessionReq(BaseModel):
     classroom_path: str
     lesson_path: str
@@ -252,12 +258,21 @@ def list_lessons() -> list[dict]:
 
 @app.post("/api/sessions")
 def create_session(req: CreateSessionReq) -> dict:
+    if req.backend not in ALLOWED_BACKENDS:
+        raise HTTPException(status_code=400,
+                            detail=f"지원하지 않는 백엔드입니다: {req.backend!r} (가능: {', '.join(ALLOWED_BACKENDS)})")
     cpath = _safe_path(req.classroom_path, "personas", ".json")
     lpath = _safe_path(req.lesson_path, "lessons", ".md")
     try:
         classroom = load_classroom(cpath)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"학급 로드 실패: {exc}") from exc
+    if len(classroom.students) > MAX_STUDENTS:
+        raise HTTPException(status_code=400,
+                            detail=f"학급 인원이 너무 많습니다 ({len(classroom.students)}명). 최대 {MAX_STUDENTS}명까지 지원합니다.")
+    if lpath.stat().st_size > MAX_LESSON_BYTES:
+        raise HTTPException(status_code=400,
+                            detail="수업안 파일이 너무 큽니다 (200KB 초과). 핵심 내용만 남겨 주세요.")
     lesson_text = lpath.read_text(encoding="utf-8")
 
     _evict_stale()
@@ -296,12 +311,20 @@ def _title_of(path: Path) -> str:
 @app.post("/api/sessions/{session_id}/turn")
 def take_turn(session_id: str, req: TurnReq) -> dict:
     rec = _get(session_id)
+    text = (req.input or "").strip()
+    if len(text) > MAX_INPUT_CHARS:
+        raise HTTPException(status_code=400,
+                            detail=f"입력이 너무 깁니다 ({len(text)}자). 한 번에 {MAX_INPUT_CHARS}자 이내로 나눠 말해 주세요.")
     if not rec.lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="이전 입력이 아직 처리 중입니다. 잠시 후 다시 보내 주세요.")
     try:
-        result = rec.session.turn(req.input)
+        result = rec.session.turn(text)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"턴 처리 실패: {exc}") from exc
+        # 내부 예외 문자열을 사용자에게 그대로 노출하지 않는다 (서버 로그로만)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500,
+                            detail="턴 처리 중 서버 오류가 발생했습니다. 같은 입력을 한 번 더 보내 보시고, 반복되면 새 수업으로 시작해 주세요.") from exc
     finally:
         rec.touch()
         rec.lock.release()
