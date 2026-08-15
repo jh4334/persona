@@ -545,3 +545,11 @@ button.danger { color: var(--danger); }
   .md h2 { page-break-after: avoid; }
   .md table, .md blockquote { page-break-inside: avoid; }
 }
+
+/* ── 접근성 ── */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px;
+  padding: 0; border: 0; clip: rect(0 0 0 0); clip-path: inset(50%);
+  overflow: hidden; white-space: nowrap;
+}
+#classroom:focus-visible { outline: 3px solid #ffe066; outline-offset: 2px; }

@@ -79,9 +79,11 @@
   <!-- 무대 + 사이드 패널 -->
   <main id="stage-main">
     <div id="canvas-wrap">
-      <canvas id="classroom" width="336" height="256"></canvas>
-      <div id="busy" hidden><span class="dots"></span>학생들이 반응하는 중...</div>
+      <canvas id="classroom" width="336" height="256" tabindex="0" role="application"
+              aria-label="교실 무대. 화살표 키로 학생을 고르고 Enter로 상세 카드를 엽니다."></canvas>
+      <div id="busy" role="status" hidden><span class="dots"></span>학생들이 반응하는 중...</div>
     </div>
+    <div id="sr-live" class="sr-only" aria-live="polite"></div>
 
     <aside id="side-panel">
       <!-- 모바일 바텀시트 손잡이 (데스크톱에서는 숨김) -->

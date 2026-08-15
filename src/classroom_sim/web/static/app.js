@@ -274,6 +274,7 @@ const Stage = {
     if (!Stage._wired) {
       Stage._wired = true;
       Stage.canvas.addEventListener('click', Stage.onClick);
+      Stage.canvas.addEventListener('keydown', Stage.onKey);
       window.addEventListener('resize', Stage.resize);
       window.addEventListener('orientationchange', () => setTimeout(Stage.resize, 250));
       // 탭이 다시 보이면 강제로 한 프레임 그린다 (숨김 중 상태 변화 반영)
@@ -322,6 +323,23 @@ const Stage = {
     Stage.canvas.width = Stage.W * Stage.scale;
     Stage.canvas.height = Stage.H * Stage.scale;
     Stage.dirty = true;
+  },
+
+  /** 키보드로 학생 선택 — 화살표로 이동, Enter/Space로 카드, Escape로 해제 */
+  onKey(ev) {
+    const n = App.students.length;
+    if (!n) return;
+    const cur = App.selected ? App.students.findIndex((s) => s.id === App.selected) : -1;
+    let next = cur;
+    if (ev.key === 'ArrowRight') next = cur < 0 ? 0 : Math.min(n - 1, cur + 1);
+    else if (ev.key === 'ArrowLeft') next = cur < 0 ? 0 : Math.max(0, cur - 1);
+    else if (ev.key === 'ArrowDown') next = cur < 0 ? 0 : Math.min(n - 1, cur + COLS);
+    else if (ev.key === 'ArrowUp') next = cur < 0 ? 0 : Math.max(0, cur - COLS);
+    else if (ev.key === 'Escape') { UI.selectStudent(null); ev.preventDefault(); return; }
+    else if ((ev.key === 'Enter' || ev.key === ' ') && cur >= 0) { ev.preventDefault(); return; }
+    else return;
+    ev.preventDefault();
+    if (next !== cur) UI.selectStudent(App.students[next].id);
   },
 
   onClick(ev) {
@@ -1065,6 +1083,19 @@ const UI = {
   selectStudent(id) {
     App.selected = id;
     Stage.dirty = true;
+    // 스크린리더 안내 (시각적 표시는 캔버스라 읽히지 않는다)
+    const live = $('#sr-live');
+    if (live) {
+      if (id) {
+        const stu = App.students.find((s) => s.id === id);
+        const st = App.states[id] || {};
+        live.textContent = stu
+          ? `${stu.name} 선택됨. 이해 ${st.comprehension ?? '-'}, 흥미 ${st.interest ?? '-'}, 집중 ${st.focus ?? '-'}, 감정 ${st.emotion || '평온'}.`
+          : '';
+      } else {
+        live.textContent = '선택 해제됨.';
+      }
+    }
     if (!id) {
       $('#detail-card').hidden = true;
       $('#detail-empty').hidden = false;
