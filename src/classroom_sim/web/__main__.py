@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import socket
 
@@ -75,6 +76,13 @@ def main() -> None:
         os.environ["CLASSROOM_SIM_FAKE"] = "1"
 
     import uvicorn
+
+    # 앱 로그(classroom_sim.web)가 시간과 함께 터미널에 남게 한다.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
     _print_access_hint(args.host, args.port)
 

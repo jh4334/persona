@@ -18,11 +18,11 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import os
 import re
 import threading
 import time
-import traceback
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -56,6 +56,10 @@ def _repo_root() -> Path:
 
 
 ROOT = _repo_root()
+START_TIME = time.time()
+
+# 운영 진단용 로거 — "느려요/안 돼요"가 왔을 때 서버 터미널만 보고 원인을 좁힐 수 있게 한다.
+log = logging.getLogger("classroom_sim.web")
 
 
 def _use_fake() -> bool:
@@ -126,9 +130,11 @@ def _evict_stale() -> None:
     with _SESSIONS_GUARD:
         for sid in [s for s, r in SESSIONS.items() if now - r.last_used > SESSION_IDLE_TTL]:
             SESSIONS.pop(sid, None)
+            log.info("session evicted (idle TTL): %s", sid[:8])
         while len(SESSIONS) >= MAX_SESSIONS:
             oldest = min(SESSIONS, key=lambda s: SESSIONS[s].last_used)
             SESSIONS.pop(oldest, None)
+            log.info("session evicted (cap %d): %s", MAX_SESSIONS, oldest[:8])
 
 
 def _get(session_id: str) -> SessionRecord:
@@ -260,6 +266,18 @@ def list_lessons() -> list[dict]:
     return out
 
 
+@app.get("/healthz")
+def healthz() -> dict:
+    """운영 확인용 — 프로세스 생존, 세션 수, 가동 시간. LLM은 호출하지 않는다."""
+    return {
+        "status": "ok",
+        "version": app.version,
+        "uptime_s": int(time.time() - START_TIME),
+        "sessions": len(SESSIONS),
+        "max_sessions": MAX_SESSIONS,
+    }
+
+
 @app.post("/api/sessions")
 def create_session(req: CreateSessionReq) -> dict:
     if req.backend not in ALLOWED_BACKENDS:
@@ -291,6 +309,8 @@ def create_session(req: CreateSessionReq) -> dict:
             "backend": backend_used,
         },
     )
+    log.info("session created: %s class=%s students=%d backend=%s lesson=%s",
+             sid[:8], classroom.class_name, len(classroom.students), backend_used, lpath.name)
     snapshot = _serialize(session.state_snapshot())
     return {
         "session_id": sid,
@@ -327,9 +347,10 @@ def _save_report(rec: "SessionRecord", session_id: str, report: str) -> str | No
                 json.dumps(_serialize(transcript), ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception:
             pass
+        log.info("report saved: session=%s path=%s", session_id[:8], f"{base}.md")
         return str((out_dir / f"{base}.md").relative_to(ROOT))
     except Exception:
-        traceback.print_exc()
+        log.exception("report save failed: session=%s", session_id[:8])
         return None
 
 
@@ -342,17 +363,20 @@ def take_turn(session_id: str, req: TurnReq) -> dict:
                             detail=f"입력이 너무 깁니다 ({len(text)}자). 한 번에 {MAX_INPUT_CHARS}자 이내로 나눠 말해 주세요.")
     if not rec.lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="이전 입력이 아직 처리 중입니다. 잠시 후 다시 보내 주세요.")
+    t0 = time.perf_counter()
     try:
         result = rec.session.turn(text)
     except Exception as exc:
         # 내부 예외 문자열을 사용자에게 그대로 노출하지 않는다 (서버 로그로만)
-        import traceback
-        traceback.print_exc()
+        log.exception("turn failed: session=%s input=%r", session_id[:8], text[:80])
         raise HTTPException(status_code=500,
                             detail="턴 처리 중 서버 오류가 발생했습니다. 같은 입력을 한 번 더 보내 보시고, 반복되면 새 수업으로 시작해 주세요.") from exc
     finally:
         rec.touch()
         rec.lock.release()
+    log.info("turn ok: session=%s turn=%d took=%.1fs events=%d ended=%s",
+             session_id[:8], getattr(result, "turn", -1), time.perf_counter() - t0,
+             len(getattr(result, "events", []) or []), getattr(result, "ended", False))
     out = _serialize(result)
     if getattr(result, "ended", False) and getattr(result, "report_markdown", None):
         out["report_saved_path"] = _save_report(rec, session_id, result.report_markdown)
