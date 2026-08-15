@@ -938,6 +938,7 @@ const UI = {
     try {
       const r = await Api.turn(App.sessionId, text);
       UI.applyTurn(r);
+      if (r.notice) UI.addSystemLine(r.notice);
       if (r.ended) await UI.showReport(r.report_markdown, r.report_saved_path);
     } catch (e) {
       UI.addLine('system', '오류', e.message + '  (입력한 내용은 입력창에 남겨 두었어요)');

@@ -28,7 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -267,6 +267,27 @@ ALLOWED_BACKENDS = ("mock", "codex", "anthropic")
 MAX_INPUT_CHARS = 2000       # 교사 입력 1회 상한
 MAX_LESSON_BYTES = 200_000   # 수업안 파일 상한 (~200KB)
 MAX_STUDENTS = 40            # 학급 인원 상한
+MAX_TURNS_PER_SESSION = 200  # 세션당 턴 상한 (실수 루프·폭주로 인한 LLM 과금 방어)
+TURNS_WARN_AT = 180          # 이 턴부터 상한 임박 안내
+CREATE_RATE_LIMIT = 10       # 같은 주소에서 10분당 세션 생성 허용 횟수
+CREATE_RATE_WINDOW = 600.0
+
+_CREATE_TIMES: dict[str, list[float]] = {}
+_CREATE_GUARD = threading.Lock()
+
+
+def _check_create_rate(client_ip: str) -> None:
+    """세션 생성 속도 제한 — 새로고침 루프·스크립트 폭주로부터 서버와 지갑을 지킨다."""
+    now = time.time()
+    with _CREATE_GUARD:
+        times = [t for t in _CREATE_TIMES.get(client_ip, []) if now - t < CREATE_RATE_WINDOW]
+        if len(times) >= CREATE_RATE_LIMIT:
+            wait = int(CREATE_RATE_WINDOW - (now - times[0])) + 1
+            raise HTTPException(
+                status_code=429,
+                detail=f"수업 생성이 너무 잦습니다. 약 {max(1, wait // 60)}분 후 다시 시도해 주세요.")
+        times.append(now)
+        _CREATE_TIMES[client_ip] = times
 
 
 class CreateSessionReq(BaseModel):
@@ -338,7 +359,8 @@ def healthz() -> dict:
 
 
 @app.post("/api/sessions")
-def create_session(req: CreateSessionReq) -> dict:
+def create_session(req: CreateSessionReq, request: Request) -> dict:
+    _check_create_rate(request.client.host if request.client else "unknown")
     if req.backend not in ALLOWED_BACKENDS:
         raise HTTPException(status_code=400,
                             detail=f"지원하지 않는 백엔드입니다: {req.backend!r} (가능: {', '.join(ALLOWED_BACKENDS)})")
@@ -421,6 +443,13 @@ def take_turn(session_id: str, req: TurnReq) -> dict:
     if len(text) > MAX_INPUT_CHARS:
         raise HTTPException(status_code=400,
                             detail=f"입력이 너무 깁니다 ({len(text)}자). 한 번에 {MAX_INPUT_CHARS}자 이내로 나눠 말해 주세요.")
+    # 턴 상한 — LLM 백엔드 폭주 과금 방어. /종료·/상태는 LLM을 쓰지 않으므로 허용.
+    cur_turn = int(getattr(getattr(rec.session, "state", None), "turn", 0) or 0)
+    if cur_turn >= MAX_TURNS_PER_SESSION and not re.match(r"^/(종료|상태)(\s|$)", text):
+        raise HTTPException(
+            status_code=429,
+            detail=f"이 수업이 턴 상한({MAX_TURNS_PER_SESSION}턴)에 도달했습니다. "
+                   "/종료 로 리포트를 만들고 새 수업으로 시작해 주세요.")
     if not rec.lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="이전 입력이 아직 처리 중입니다. 잠시 후 다시 보내 주세요.")
     t0 = time.perf_counter()
@@ -438,6 +467,10 @@ def take_turn(session_id: str, req: TurnReq) -> dict:
              session_id[:8], getattr(result, "turn", -1), time.perf_counter() - t0,
              len(getattr(result, "events", []) or []), getattr(result, "ended", False))
     out = _serialize(result)
+    new_turn = int(getattr(result, "turn", 0) or 0)
+    if TURNS_WARN_AT <= new_turn < MAX_TURNS_PER_SESSION:
+        out["notice"] = (f"수업이 {new_turn}턴째입니다. {MAX_TURNS_PER_SESSION}턴에 도달하면 "
+                         "새 입력이 제한되니 /종료 로 리포트를 만들어 주세요.")
     if getattr(result, "ended", False):
         _drop_snapshot(session_id)   # 종료된 수업은 리포트로 남으므로 스냅샷은 정리
         if getattr(result, "report_markdown", None):
