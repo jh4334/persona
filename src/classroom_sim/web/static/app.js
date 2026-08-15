@@ -909,7 +909,7 @@ const UI = {
     try {
       const r = await Api.turn(App.sessionId, text);
       UI.applyTurn(r);
-      if (r.ended) await UI.showReport(r.report_markdown);
+      if (r.ended) await UI.showReport(r.report_markdown, r.report_saved_path);
     } catch (e) {
       UI.addLine('system', '오류', e.message + '  (입력한 내용은 입력창에 남겨 두었어요)');
       if (!input.value) input.value = text;   // 쓰던 내용 유실 방지
@@ -1034,13 +1034,21 @@ const UI = {
   },
 
   /* ── 종료 리포트 ── */
-  async showReport(md) {
+  async showReport(md, savedPath) {
     let report = md;
     if (!report) {
-      try { report = (await Api.end(App.sessionId)).report_markdown; } catch (e) { report = null; }
+      try {
+        const r = await Api.end(App.sessionId);
+        report = r.report_markdown;
+        savedPath = savedPath || r.report_saved_path;
+      } catch (e) { report = null; }
     }
     App.reportMd = report || '# 수업 종료\n\n리포트를 생성하지 못했습니다.';
-    $('#report-body').innerHTML = mdToHtml(App.reportMd);
+    let html = mdToHtml(App.reportMd);
+    if (savedPath) {
+      html += `<p class="saved-note">💾 서버에도 저장됨: <code>${esc(savedPath)}</code> (전사 JSON 포함)</p>`;
+    }
+    $('#report-body').innerHTML = html;
     document.body.dataset.screen = 'report';
     UI.forget();
   },

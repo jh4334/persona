@@ -17,10 +17,14 @@ dataclasses.asdict 기반이다.
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
+import re
 import threading
 import time
+import traceback
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -308,6 +312,27 @@ def _title_of(path: Path) -> str:
     return path.stem
 
 
+def _save_report(rec: "SessionRecord", session_id: str, report: str) -> str | None:
+    """리포트·전사를 서버에도 남긴다 (브라우저를 닫아도 유실되지 않게). 실패해도 응답은 막지 않는다."""
+    try:
+        out_dir = ROOT / "reports" / "stage"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        cname = re.sub(r"[^\w가-힣-]+", "_", rec.classroom.class_name).strip("_") or "학급"
+        base = f"{stamp}_{cname}_{session_id[:8]}"
+        (out_dir / f"{base}.md").write_text(report or "", encoding="utf-8")
+        try:
+            transcript = rec.session.transcript_json()
+            (out_dir / f"{base}.transcript.json").write_text(
+                json.dumps(_serialize(transcript), ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        return str((out_dir / f"{base}.md").relative_to(ROOT))
+    except Exception:
+        traceback.print_exc()
+        return None
+
+
 @app.post("/api/sessions/{session_id}/turn")
 def take_turn(session_id: str, req: TurnReq) -> dict:
     rec = _get(session_id)
@@ -328,7 +353,10 @@ def take_turn(session_id: str, req: TurnReq) -> dict:
     finally:
         rec.touch()
         rec.lock.release()
-    return _serialize(result)
+    out = _serialize(result)
+    if getattr(result, "ended", False) and getattr(result, "report_markdown", None):
+        out["report_saved_path"] = _save_report(rec, session_id, result.report_markdown)
+    return out
 
 
 @app.get("/api/sessions/{session_id}/state")
@@ -361,7 +389,7 @@ def end_session(session_id: str) -> dict:
     finally:
         rec.touch()
         rec.lock.release()
-    return {"report_markdown": report}
+    return {"report_markdown": report, "report_saved_path": _save_report(rec, session_id, report)}
 
 
 # 정적 파일 (앱 라우트 뒤에 마운트해야 /api 경로를 가리지 않는다)
