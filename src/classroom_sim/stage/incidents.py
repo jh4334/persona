@@ -52,8 +52,16 @@ def names() -> list[str]:
     return [c.name for c in CARDS]
 
 
-def draw(name: str | None = None, rng: random.Random | None = None) -> Incident:
-    """카드 뽑기. name이 없으면 무작위, 이름이 틀리면 부분 일치를 시도한다."""
+def draw(
+    name: str | None = None,
+    rng: random.Random | None = None,
+    exclude: list[str] | None = None,
+) -> Incident:
+    """카드 뽑기. name이 없으면 무작위, 이름이 틀리면 부분 일치를 시도한다.
+
+    exclude에 이미 나온 카드 이름을 넘기면 무작위 뽑기에서 제외한다
+    (전부 나왔으면 다시 전체에서 뽑는다). 이름을 지정한 선택은 제외와 무관.
+    """
     if name:
         key = name.strip()
         if key in _BY_NAME:
@@ -63,4 +71,5 @@ def draw(name: str | None = None, rng: random.Random | None = None) -> Incident:
                 return card
         raise KeyError(f"알 수 없는 돌발 카드: {name} (사용 가능: {', '.join(names())})")
     picker = rng or random
-    return picker.choice(list(CARDS))
+    pool = [c for c in CARDS if c.name not in (exclude or [])] or list(CARDS)
+    return picker.choice(pool)

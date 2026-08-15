@@ -216,7 +216,8 @@ class StageSession:
             return {"kind": "time_skip", "minutes": max(1, int(m.group(1))), "text": rest}
         if cmd == "돌발":
             try:
-                card = incidents.draw(rest or None, rng=self.rng)
+                # 무작위 뽑기는 이번 수업에서 이미 나온 카드를 피한다 (전부 소진 시 초기화)
+                card = incidents.draw(rest or None, rng=self.rng, exclude=self.state.incidents)
             except KeyError as e:
                 return {"kind": "error", "message": str(e)}
             return {"kind": "incident", "incident": card.name, "text": card.description}

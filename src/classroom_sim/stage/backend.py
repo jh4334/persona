@@ -487,6 +487,19 @@ class MockBackend:
 
     def __init__(self, seed: int | None = None) -> None:
         self.rng = random.Random(20260813 if seed is None else seed)
+        # 학생별 직전 대사 — 같은 학생이 같은 말을 연달아 반복하지 않게 한다
+        self._last_line: dict[str, str] = {}
+
+    def _pick_line(self, who: str, pool: tuple) -> dict:
+        pick = self.rng.choice(pool)
+        key = f"{pick.get('utterance', '')}|{pick.get('action', '')}"
+        if self._last_line.get(who) == key and len(pool) > 1:
+            others = tuple(c for c in pool
+                           if f"{c.get('utterance', '')}|{c.get('action', '')}" != key)
+            pick = self.rng.choice(others)
+            key = f"{pick.get('utterance', '')}|{pick.get('action', '')}"
+        self._last_line[who] = key
+        return pick
 
     # -- 공개 API --
 
@@ -741,6 +754,7 @@ class MockBackend:
     # -- 학생 발화 --
 
     def _speak(self, p: dict) -> dict:
+        who = str(p.get("name", ""))
         traits = " ".join(p.get("traits", []))
         st = p.get("state", {})
         comp = int(st.get("comprehension", 60))
@@ -752,7 +766,7 @@ class MockBackend:
         nominated = bool(p.get("nominated"))
 
         if anxious and (nominated or emotion in ("불안", "위축")):
-            return self.rng.choice((
+            return self._pick_line(who, (
                 {"utterance": "", "action": "……(고개를 숙인다)"},
                 {"utterance": "…….", "action": "입을 열었다가 다시 다문다"},
                 {"utterance": "잘…… 모르겠어요.", "action": "목소리가 거의 들리지 않는다"},
@@ -761,7 +775,7 @@ class MockBackend:
             ))
 
         if comp < 40:
-            return self.rng.choice((
+            return self._pick_line(who, (
                 {"utterance": "어…… 그게 무슨 말이에요?", "action": ""},
                 {"utterance": "잘 모르겠어요.", "action": "연필을 내려놓는다"},
                 {"utterance": "어차피 저는 못 할 것 같은데요.", "action": ""},
@@ -771,7 +785,7 @@ class MockBackend:
             ))
 
         if focus < 35:
-            return self.rng.choice((
+            return self._pick_line(who, (
                 {"utterance": "네? 뭐라고 하셨어요?", "action": "창밖을 보다 고개를 든다"},
                 {"utterance": "", "action": "옆 친구에게 방금 뭐라고 했냐고 묻는다"},
                 {"utterance": "아, 그거…… 몇 쪽이에요?", "action": ""},
@@ -780,7 +794,7 @@ class MockBackend:
             ))
 
         if active or interest >= 75:
-            return self.rng.choice((
+            return self._pick_line(who, (
                 {"utterance": "선생님, 그럼 순서를 바꾸면 답도 달라져요?", "action": "손을 번쩍 든다"},
                 {"utterance": "이거 아까 배운 거랑 비슷한 거 아니에요?", "action": ""},
                 {"utterance": "저요! 제가 말해 볼게요.", "action": "몸을 앞으로 내민다"},
@@ -789,7 +803,7 @@ class MockBackend:
                 {"utterance": "선생님, 왜 그렇게 되는 거예요?", "action": ""},
             ))
 
-        return self.rng.choice((
+        return self._pick_line(who, (
             {"utterance": "아, 알 것 같아요.", "action": ""},
             {"utterance": "네, 알겠습니다.", "action": "공책에 받아 적는다"},
             {"utterance": "이렇게 쓰면 되는 거 맞죠?", "action": "공책을 들어 보인다"},
