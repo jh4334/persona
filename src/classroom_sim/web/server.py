@@ -346,6 +346,15 @@ def list_lessons() -> list[dict]:
     return out
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    """브라우저가 관성적으로 요청하는 /favicon.ico — 404 콘솔 노이즈 방지."""
+    icon = STATIC_DIR / "favicon.png"
+    if not icon.is_file():
+        raise HTTPException(status_code=404, detail="favicon 없음")
+    return FileResponse(str(icon), media_type="image/png")
+
+
 @app.get("/healthz")
 def healthz() -> dict:
     """운영 확인용 — 프로세스 생존, 세션 수, 가동 시간. LLM은 호출하지 않는다."""
