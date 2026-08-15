@@ -17,12 +17,14 @@ const CLASSROOM_LAYOUT = Object.freeze({
   columns: 4, logicalWidth: 336, deskWidth: 40, deskHeight: 40,
   columnCenters: Object.freeze([48, 128, 208, 288]), rowStart: 110, rowGap: 88,
   spriteWidth: 32, spriteHeight: 48, wallHeight: 46, assetScale: 4, renderScale: 4,
+  deskBackHeight: 12, seatBottomOffset: 22,
 });
 const {
   columns: COLS, logicalWidth: LOGICAL_W, deskWidth: DESK_W, deskHeight: DESK_H,
   columnCenters: COL_X, rowStart: ROW_Y0, rowGap: ROW_GAP,
   spriteWidth: SPRITE_W, spriteHeight: SPRITE_H, wallHeight: WALL_H,
   assetScale: ASSET_SCALE, renderScale: RENDER_SCALE,
+  deskBackHeight: DESK_BACK_H, seatBottomOffset: SEAT_BOTTOM_OFFSET,
 } = CLASSROOM_LAYOUT;
 
 const ASSET_BASE = '/static/assets/vector/';
@@ -340,7 +342,12 @@ const Stage = {
     const col = i % COLS, row = Math.floor(i / COLS);
     const cx = COL_X[col];
     const deskTop = ROW_Y0 + row * ROW_GAP;
-    return { cx, deskTop, spriteX: cx - SPRITE_W / 2, spriteY: deskTop + 10 - SPRITE_H };
+    return {
+      cx,
+      deskTop,
+      spriteX: cx - SPRITE_W / 2,
+      spriteY: deskTop + SEAT_BOTTOM_OFFSET - SPRITE_H,
+    };
   },
 
   resize() {
@@ -466,19 +473,40 @@ const Stage = {
     }
   },
 
-  drawDesk(g, s, sid) {
+  drawDesk(g, s, sid, layer) {
     const x = s.cx - DESK_W / 2, y = s.deskTop;
     if (Assets.images.desk_student) {
-      g.drawImage(Assets.images.desk_student, x, y, DESK_W, DESK_H);
+      const desk = Assets.images.desk_student;
+      const sourceSplit = DESK_BACK_H * ASSET_SCALE;
+      if (layer === 'back') {
+        g.drawImage(desk, 0, 0, desk.width, sourceSplit, x, y, DESK_W, DESK_BACK_H);
+      } else {
+        g.drawImage(
+          desk,
+          0,
+          sourceSplit,
+          desk.width,
+          desk.height - sourceSplit,
+          x,
+          y + DESK_BACK_H,
+          DESK_W,
+          DESK_H - DESK_BACK_H,
+        );
+      }
     } else {
       const colors = CLASSROOM_COLORS;
-      g.fillStyle = colors.ink; g.fillRect(x - 1, y - 1, DESK_W + 2, DESK_H + 2);
-      g.fillStyle = colors.woodLight; g.fillRect(x, y, DESK_W, 5);
-      g.fillStyle = colors.wood; g.fillRect(x, y + 5, DESK_W, 4);
-      g.fillStyle = colors.woodDark; g.fillRect(x, y + 9, DESK_W, DESK_H - 9);
-      g.fillStyle = colors.ink; g.fillRect(x + 3, y + DESK_H, 3, 4); g.fillRect(x + DESK_W - 6, y + DESK_H, 3, 4);
-      g.fillStyle = colors.white; g.fillRect(x + 6, y + 1, 12, 3);
+      if (layer === 'back') {
+        g.fillStyle = colors.woodDark; g.fillRect(x + 11, y + 2, 18, 10);
+        g.fillStyle = colors.wood; g.fillRect(x + 13, y + 4, 14, 7);
+      } else {
+        g.fillStyle = colors.ink; g.fillRect(x - 1, y + DESK_BACK_H - 1, DESK_W + 2, DESK_H - DESK_BACK_H + 2);
+        g.fillStyle = colors.woodLight; g.fillRect(x, y + DESK_BACK_H, DESK_W, 7);
+        g.fillStyle = colors.wood; g.fillRect(x, y + DESK_BACK_H + 7, DESK_W, 5);
+        g.fillStyle = colors.woodDark; g.fillRect(x + 3, y + DESK_BACK_H + 12, 4, DESK_H - DESK_BACK_H - 12);
+        g.fillRect(x + DESK_W - 7, y + DESK_BACK_H + 12, 4, DESK_H - DESK_BACK_H - 12);
+      }
     }
+    if (layer === 'back') return;
     // 모둠 테두리
     const grp = App.groups[sid];
     if (grp) {
@@ -554,8 +582,9 @@ const Stage = {
       // 집중이 낮으면 슬럼프 프레임(폴백 시트에만 존재)
       const low = (st.focus !== undefined && st.focus < 35);
       const frame = low && sprite.frames > 2 ? 2 : frameIdle;
+      Stage.drawDesk(g, s, stu.id, 'back');
       Stage.drawCharacter(g, sprite, s.spriteX, s.spriteY, frame);
-      Stage.drawDesk(g, s, stu.id);
+      Stage.drawDesk(g, s, stu.id, 'front');
       Stage.drawGauges(g, s, st);
     });
 

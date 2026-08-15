@@ -72,6 +72,27 @@ class VectorAssetContractTest(unittest.TestCase):
         # Then: neither breathing frame is duplicated.
         self.assertTrue(all(first != second for first, second in frame_pairs))
 
+    def test_student_seat_layers_chair_behind_character_and_desk_in_front(self) -> None:
+        # Given: the shared student furniture sheet and runtime renderer.
+        split_y = 12 * SCALE
+        desk_top_color = (213, 165, 111, 255)
+        app_source = (REPOSITORY_ROOT / "src/classroom_sim/web/static/app.js").read_text(encoding="utf-8")
+
+        # When: the furniture is divided at the shared seat-layer boundary.
+        with Image.open(ASSET_DIR / "desk_student.png") as image:
+            chair_back = image.crop((0, 0, image.width, split_y))
+
+        # Then: the rear band contains only the chair, while runtime sandwiches
+        # every character between the rear chair and front desk layers.
+        self.assertNotIn(desk_top_color, set(chair_back.get_flattened_data()))
+        back_call = "Stage.drawDesk(g, s, stu.id, 'back');"
+        character_call = "Stage.drawCharacter(g, sprite, s.spriteX, s.spriteY, frame);"
+        front_call = "Stage.drawDesk(g, s, stu.id, 'front');"
+        self.assertIn(back_call, app_source)
+        self.assertIn(front_call, app_source)
+        self.assertLess(app_source.index(back_call), app_source.index(character_call))
+        self.assertLess(app_source.index(character_call), app_source.index(front_call))
+
 
 if __name__ == "__main__":
     unittest.main()
