@@ -123,6 +123,63 @@ class SessionRecord:
 SESSIONS: dict[str, SessionRecord] = {}
 _SESSIONS_GUARD = threading.Lock()
 
+# 세션 스냅샷 — 서버가 재시작돼도 진행 중 수업을 되살릴 수 있게 디스크에 남긴다.
+SNAP_DIR = ROOT / ".sessions"
+
+
+def _persist_session(sid: str, rec: SessionRecord) -> None:
+    """턴이 끝날 때마다 세션 상태를 디스크에 남긴다. 실패해도 수업은 계속된다."""
+    if not hasattr(rec.session, "dump_state"):
+        return  # FakeSession 등 스냅샷 미지원 세션
+    try:
+        SNAP_DIR.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "meta": rec.meta,
+            "saved_at": time.time(),
+            "snapshot": rec.session.dump_state(),
+        }
+        tmp = SNAP_DIR / f"{sid}.json.tmp"
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(SNAP_DIR / f"{sid}.json")   # 원자적 교체 — 쓰다 만 파일 방지
+    except Exception:
+        log.exception("session persist failed: %s", sid[:8])
+
+
+def _drop_snapshot(sid: str) -> None:
+    try:
+        (SNAP_DIR / f"{sid}.json").unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _restore_sessions() -> None:
+    """서버 기동 시 디스크 스냅샷에서 진행 중이던 수업을 되살린다."""
+    if _use_fake() or not SNAP_DIR.is_dir():
+        return
+    for f in sorted(SNAP_DIR.glob("*.json")):
+        sid = f.stem
+        try:
+            payload = json.loads(f.read_text(encoding="utf-8"))
+            saved_at = float(payload.get("saved_at", 0))
+            snap = payload.get("snapshot") or {}
+            if time.time() - saved_at > SESSION_IDLE_TTL or snap.get("state", {}).get("ended"):
+                f.unlink(missing_ok=True)
+                continue
+            if len(SESSIONS) >= MAX_SESSIONS:
+                break
+            meta = payload.get("meta") or {}
+            classroom = load_classroom(ROOT / meta["classroom_path"])
+            lesson_text = (ROOT / meta["lesson_path"]).read_text(encoding="utf-8")
+            session, backend_used = _make_session(classroom, lesson_text, meta.get("backend", "mock"), None)
+            session.load_state(snap)
+            rec = SessionRecord(session, classroom, dict(meta))
+            rec.last_used = saved_at
+            SESSIONS[sid] = rec
+            log.info("session restored: %s class=%s turn=%s", sid[:8],
+                     classroom.class_name, snap.get("state", {}).get("turn"))
+        except Exception:
+            log.exception("session restore failed: %s (스냅샷을 건너뜁니다)", sid[:8])
+
 
 def _evict_stale() -> None:
     """TTL이 지났거나 상한을 넘긴 세션을 회수한다 (오래 쉰 것부터)."""
@@ -130,10 +187,12 @@ def _evict_stale() -> None:
     with _SESSIONS_GUARD:
         for sid in [s for s, r in SESSIONS.items() if now - r.last_used > SESSION_IDLE_TTL]:
             SESSIONS.pop(sid, None)
+            _drop_snapshot(sid)
             log.info("session evicted (idle TTL): %s", sid[:8])
         while len(SESSIONS) >= MAX_SESSIONS:
             oldest = min(SESSIONS, key=lambda s: SESSIONS[s].last_used)
             SESSIONS.pop(oldest, None)
+            _drop_snapshot(oldest)
             log.info("session evicted (cap %d): %s", MAX_SESSIONS, oldest[:8])
 
 
@@ -311,6 +370,7 @@ def create_session(req: CreateSessionReq) -> dict:
     )
     log.info("session created: %s class=%s students=%d backend=%s lesson=%s",
              sid[:8], classroom.class_name, len(classroom.students), backend_used, lpath.name)
+    _persist_session(sid, SESSIONS[sid])
     snapshot = _serialize(session.state_snapshot())
     return {
         "session_id": sid,
@@ -378,8 +438,12 @@ def take_turn(session_id: str, req: TurnReq) -> dict:
              session_id[:8], getattr(result, "turn", -1), time.perf_counter() - t0,
              len(getattr(result, "events", []) or []), getattr(result, "ended", False))
     out = _serialize(result)
-    if getattr(result, "ended", False) and getattr(result, "report_markdown", None):
-        out["report_saved_path"] = _save_report(rec, session_id, result.report_markdown)
+    if getattr(result, "ended", False):
+        _drop_snapshot(session_id)   # 종료된 수업은 리포트로 남으므로 스냅샷은 정리
+        if getattr(result, "report_markdown", None):
+            out["report_saved_path"] = _save_report(rec, session_id, result.report_markdown)
+    else:
+        _persist_session(session_id, rec)
     return out
 
 
@@ -413,9 +477,13 @@ def end_session(session_id: str) -> dict:
     finally:
         rec.touch()
         rec.lock.release()
+    _drop_snapshot(session_id)
     return {"report_markdown": report, "report_saved_path": _save_report(rec, session_id, report)}
 
 
 # 정적 파일 (앱 라우트 뒤에 마운트해야 /api 경로를 가리지 않는다)
 if STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# 기동 시 디스크 스냅샷에서 진행 중이던 수업 복구
+_restore_sessions()

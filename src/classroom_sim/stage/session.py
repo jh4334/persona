@@ -14,7 +14,7 @@ from ..personas import Classroom, Student
 from . import analysis, director, incidents, student_agent
 from .backend import pack_payload
 from .state import PHASES, ClassState, StudentState, TurnEvent, TurnResult, clamp
-from .transcript import Transcript
+from .transcript import Transcript, TranscriptEntry
 
 # 전사가 이 길이를 넘으면 앞부분을 요약으로 접는다.
 FOLD_THRESHOLD = 30
@@ -90,6 +90,55 @@ class StageSession:
 
     def _director_system(self) -> list[dict]:
         return list(self._system_prefix) + [{"type": "text", "text": director.DIRECTOR_SYSTEM}]
+
+    # ------------------------------------------------------------------
+    # 스냅샷 — 서버 재시작 후에도 수업을 이어갈 수 있게 상태 전체를 내보내고/되살린다
+    # ------------------------------------------------------------------
+
+    def dump_state(self) -> dict:
+        return {
+            "state": {
+                "turn": self.state.turn,
+                "minute": self.state.minute,
+                "phase": self.state.phase,
+                "ended": self.state.ended,
+                "groups": [list(g) for g in self.state.groups],
+                "incidents": list(self.state.incidents),
+                "students": {sid: st.to_dict() for sid, st in self.state.students.items()},
+            },
+            "transcript": self.transcript.to_json(),
+            "report": self._report,
+        }
+
+    def load_state(self, snap: dict) -> None:
+        """dump_state() 결과를 되살린다. 값은 감독 출력과 같은 기준으로 방어한다."""
+        s = snap.get("state") or {}
+        self.state.turn = max(0, _safe_int(s.get("turn"), 0))
+        self.state.minute = max(0, _safe_int(s.get("minute"), 0))
+        phase = str(s.get("phase") or "")
+        if phase in PHASES:
+            self.state.phase = phase
+        self.state.ended = bool(s.get("ended"))
+        self.state.groups = [
+            [str(x) for x in g] for g in (s.get("groups") or []) if isinstance(g, list)
+        ]
+        self.state.incidents = [str(x) for x in (s.get("incidents") or [])]
+        for sid, d in (s.get("students") or {}).items():
+            st = self.state.students.get(sid)
+            if st is None or not isinstance(d, dict):
+                continue
+            st.comprehension = clamp(_safe_int(d.get("comprehension"), st.comprehension))
+            st.interest = clamp(_safe_int(d.get("interest"), st.interest))
+            st.focus = clamp(_safe_int(d.get("focus"), st.focus))
+            st.emotion = str(d.get("emotion") or st.emotion)[:12]
+            st.visible_action = str(d.get("visible_action") or "")[:80]
+        rows = snap.get("transcript")
+        if isinstance(rows, list):
+            self.transcript.entries = [
+                TranscriptEntry.from_dict(d) for d in rows if isinstance(d, dict)
+            ]
+        rep = snap.get("report")
+        self._report = rep if isinstance(rep, str) else None
 
     # ------------------------------------------------------------------
     # 입력 파싱
