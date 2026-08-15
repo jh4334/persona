@@ -553,3 +553,11 @@ button.danger { color: var(--danger); }
   overflow: hidden; white-space: nowrap;
 }
 #classroom:focus-visible { outline: 3px solid #ffe066; outline-offset: 2px; }
+
+/* ── 상세 카드: 오늘 발언 모아보기 ── */
+#dc-history { margin: 10px 0 4px; font-size: 12px; }
+#dc-history summary { cursor: pointer; opacity: .85; padding: 4px 0; }
+#dc-history-body { max-height: 160px; overflow-y: auto; padding: 4px 2px 2px 8px; }
+#dc-history-body p { margin: 0 0 6px; line-height: 1.5; }
+#dc-history-body em { font-style: normal; opacity: .6; margin-right: 4px; }
+#dc-history-body .dim, #dc-history .dim { opacity: .6; }

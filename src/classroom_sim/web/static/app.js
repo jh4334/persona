@@ -1109,9 +1109,40 @@ const UI = {
     if (isMobile()) $('#side-panel').scrollTop = 0;
   },
 
+  /** 상세 카드 '오늘 발언' — 펼칠 때 그 학생의 발화·행동만 모아 보여준다 */
+  async loadHistory(id) {
+    const body = $('#dc-history-body');
+    // 같은 턴에 같은 학생이면 캐시 재사용 (턴이 지나면 새로 불러옴)
+    if (UI._histFor === id && UI._histTurn === App.turn) return;
+    UI._histFor = id; UI._histTurn = App.turn;
+    body.innerHTML = '<p class="dim">여는 중...</p>';
+    try {
+      const t = await Api.transcript(App.sessionId);
+      const mine = (t || []).filter((e) => e.actor === id);
+      if (!mine.length) {
+        body.innerHTML = '<p class="dim">아직 발언이 없습니다. 지목(@이름)해 보세요.</p>';
+        return;
+      }
+      body.innerHTML = mine.slice(-30).map((e) => {
+        const text = e.kind === 'student_say' ? `"${esc(e.content)}"` : `(${esc(e.content)})`;
+        return `<p><em>[${e.minute}분]</em> ${text}</p>`;
+      }).join('');
+    } catch (e) {
+      body.innerHTML = `<p class="dim">불러오지 못했습니다: ${esc(e.message)}</p>`;
+    }
+  },
+
   renderDetail(id) {
     const stu = App.students.find((s) => s.id === id);
     if (!stu) return;
+    // 다른 학생으로 바뀌면 발언 기록은 접고, 이전 학생 내용이 비치지 않게 본문도 비운다
+    const hist = $('#dc-history');
+    if (hist && UI._histFor !== id) {
+      hist.open = false;
+      UI._histFor = null;
+      $('#dc-history-body').innerHTML = '<p class="dim">여는 중...</p>';
+    }
+    if (hist && hist.open) UI.loadHistory(id);
     const st = App.states[id] || {};
     const p = App.personas[id] || {};
     $('#dc-name').textContent = `${stu.name} (${stu.id})`;
@@ -1429,6 +1460,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
   $('#dc-close').addEventListener('click', () => UI.selectStudent(null));
+  $('#dc-history').addEventListener('toggle', () => {
+    if ($('#dc-history').open && App.selected) UI.loadHistory(App.selected);
+  });
   $('#sheet-backdrop').addEventListener('click', () => UI.selectStudent(null));
 
   // 전사 로그 접기/펴기 (모바일 전용 버튼)
