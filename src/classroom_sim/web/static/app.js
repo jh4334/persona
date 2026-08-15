@@ -830,11 +830,75 @@ const UI = {
     return s ? s.name : actor;
   },
 
+  /* ── 명령 도움말 (서버 왕복 없이 즉시 표시) ── */
+  showHelp() {
+    UI.addLine('system', '도움말', [
+      '일반 텍스트          전체 발화 (학생들이 듣고 반응)',
+      '@이름 질문           특정 학생 지목  예) @윤지우 기준량이 뭘까?',
+      '/판서 내용           칠판에 적기     예) /판서 3 : 5',
+      '/활동 지시문         개별 활동 시작',
+      '/모둠 4인            모둠 자동 편성  (또는 /모둠 S01,S04/S02,S05)',
+      '/모둠활동 지시문     모둠 활동 시작',
+      '/순회 이름 [말]      순회 지도',
+      '/칭찬 이름 [말]      칭찬  ·  /주의 이름 [말]  주의 주기',
+      '/시간 10분           수업 시간 건너뛰기',
+      '/돌발 [카드명]       돌발 상황 발생 (비우면 무작위)',
+      '/상태                전체 학생 상태표',
+      '/종료                수업 종료 + 사후 리포트',
+    ].join('\n'));
+  },
+
+  /** 서버 _resolve와 같은 규칙: ID → 이름 완전일치 → 이름 앞부분 일치 */
+  resolveLocal(token) {
+    const key = (token || '').trim().replace(/,+$/, '');
+    if (!key) return null;
+    const up = key.toUpperCase();
+    let hit = App.students.find((s) => s.id.toUpperCase() === up);
+    if (!hit) hit = App.students.find((s) => s.name === key);
+    if (!hit) hit = App.students.find((s) => s.name.startsWith(key) || key.startsWith(s.name));
+    return hit || null;
+  },
+
+  /** 서버로 보내기 전에 오타를 잡는다. 문제가 있으면 안내를 출력하고 false */
+  precheck(text) {
+    if (text.startsWith('@')) {
+      const head = text.slice(1).split(/\s+/)[0];
+      if (!UI.resolveLocal(head)) {
+        const names = App.students.map((s) => s.name).join(', ');
+        UI.addLine('system', '무대', `'${head}' 학생을 찾을 수 없습니다.\n우리 반: ${names}`);
+        return false;
+      }
+      return true;
+    }
+    if (text.startsWith('/')) {
+      const cmd = text.slice(1).split(/\s+/)[0];
+      const known = ['판서', '활동', '모둠', '모둠활동', '순회', '칭찬', '주의',
+                     '시간', '돌발', '상태', '종료', '도움말'];
+      if (!known.includes(cmd)) {
+        UI.addLine('system', '무대', `알 수 없는 명령입니다: /${cmd}\n[도움말] 버튼을 누르면 명령 목록이 나옵니다.`);
+        return false;
+      }
+      if (['순회', '칭찬', '주의'].includes(cmd)) {
+        const name = (text.slice(1).split(/\s+/)[1] || '');
+        if (name && !UI.resolveLocal(name)) {
+          UI.addLine('system', '무대', `'${name}' 학생을 찾을 수 없습니다. 학생을 클릭한 뒤 버튼을 쓰면 이름이 자동으로 들어갑니다.`);
+          return false;
+        }
+      }
+    }
+    return true;
+  },
+
   /* ── 턴 전송 ── */
   async send(rawText) {
     const input = $('#teacher-input');
     const text = (rawText !== undefined ? rawText : input.value).trim();
     if (!text || App.busy || App.ended) return;
+    Autocomplete.close();
+    // 도움말은 서버 왕복 없이 즉시 (LLM 호출·대기 없음)
+    if (/^\/(도움말|help|\?)(\s|$)/.test(text)) { UI.showHelp(); input.value = ''; return; }
+    // 오타(없는 명령·없는 학생)는 보내기 전에 잡는다 — 입력은 지우지 않고 남겨 둔다
+    if (!UI.precheck(text)) return;
     // 실수 방지: 종료는 한 번 더 확인 (리포트 생성 후에는 되돌릴 수 없음)
     if (/^\/종료(\s|$)/.test(text)
         && !window.confirm('수업을 종료하고 사후 리포트를 생성할까요?\n종료 후에는 수업을 이어갈 수 없습니다.')) {
@@ -1115,9 +1179,68 @@ function renderTable(rows) {
 
 /* ══════════════════════════ 7. 이벤트 바인딩 ══════════════════════════ */
 
+/* ── @학생 자동완성 ── */
+const Autocomplete = {
+  open: false, idx: -1, items: [], prefix: '',
+
+  /** 입력값이 '@…' 또는 '/순회|칭찬|주의 …'로 이름을 고르는 중이면 후보를 띄운다 */
+  update() {
+    const input = $('#teacher-input');
+    const m = input.value.match(/^(@|\/(?:순회|칭찬|주의)\s+)(\S*)$/);
+    if (!m || App.ended || !App.students.length) return Autocomplete.close();
+    const q = m[2];
+    const qUp = q.toUpperCase();
+    const items = App.students.filter((s) =>
+      !q || s.name.includes(q) || s.id.toUpperCase().startsWith(qUp));
+    if (!items.length) return Autocomplete.close();
+    Autocomplete.items = items;
+    Autocomplete.prefix = m[1];
+    Autocomplete.idx = -1;
+    Autocomplete.open = true;
+    const box = $('#autocomplete');
+    box.innerHTML = '';
+    items.forEach((s, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ac-item';
+      b.textContent = s.name;
+      // 포커스를 뺏지 않도록 mousedown에서 처리 (click은 blur 이후라 입력이 흐트러진다)
+      b.addEventListener('mousedown', (e) => { e.preventDefault(); Autocomplete.pick(i); });
+      box.appendChild(b);
+    });
+    box.hidden = false;
+  },
+
+  move(delta) {
+    if (!Autocomplete.open) return;
+    const n = Autocomplete.items.length;
+    Autocomplete.idx = (Autocomplete.idx + delta + n) % n;
+    $('#autocomplete').querySelectorAll('.ac-item').forEach((el, i) => {
+      el.classList.toggle('active', i === Autocomplete.idx);
+    });
+  },
+
+  pick(i) {
+    const s = Autocomplete.items[i];
+    if (!s) return;
+    const input = $('#teacher-input');
+    input.value = Autocomplete.prefix + s.name + ' ';
+    Autocomplete.close();
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  },
+
+  close() {
+    Autocomplete.open = false;
+    Autocomplete.idx = -1;
+    $('#autocomplete').hidden = true;
+  },
+};
+
 function insertCommand(cmd) {
   const input = $('#teacher-input');
   let text = cmd;
+  if (cmd === 'help') { UI.showHelp(); return; }
   if (cmd === 'incident') {
     const card = $('#incident-card').value;
     text = card ? `/돌발 ${card}` : '/돌발';
@@ -1147,7 +1270,17 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#btn-start').addEventListener('click', UI.start);
 
   $('#btn-send').addEventListener('click', () => UI.send());
+  $('#teacher-input').addEventListener('input', () => Autocomplete.update());
+  $('#teacher-input').addEventListener('blur', () => setTimeout(Autocomplete.close, 150));
   $('#teacher-input').addEventListener('keydown', (e) => {
+    if (Autocomplete.open) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); Autocomplete.move(1); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); Autocomplete.move(-1); return; }
+      if (e.key === 'Escape') { Autocomplete.close(); return; }
+      if (e.key === 'Enter' && !e.isComposing && Autocomplete.idx >= 0) {
+        e.preventDefault(); Autocomplete.pick(Autocomplete.idx); return;
+      }
+    }
     if (e.key === 'Enter' && !e.isComposing) UI.send();
   });
 

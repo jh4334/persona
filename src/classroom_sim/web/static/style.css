@@ -502,3 +502,18 @@ button.danger { color: var(--danger); }
 .resume-banner p { margin: 0 0 10px; font-size: 13px; }
 .resume-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .resume-actions button { min-height: 38px; }
+
+/* ── @학생 자동완성 ── */
+#autocomplete {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  padding: 6px; border: 1px solid var(--line, #3a3f36);
+  border-radius: 8px; background: rgba(20, 24, 18, .96);
+}
+#autocomplete .ac-item {
+  padding: 6px 10px; font-size: 12px; min-height: 34px;
+  border-radius: 6px; cursor: pointer;
+}
+#autocomplete .ac-item.active { outline: 2px solid #ffe066; }
+@media (max-width: 820px) {
+  #autocomplete .ac-item { min-height: 42px; padding: 8px 12px; }
+}

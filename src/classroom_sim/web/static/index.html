@@ -142,8 +142,10 @@
         </span>
         <button data-cmd="/시간 5분">시간 +5분</button>
         <button data-cmd="/상태">상태</button>
+        <button data-cmd="help" title="명령어 도움말">도움말</button>
         <button data-cmd="/종료" class="danger">종료</button>
       </div>
+      <div id="autocomplete" hidden></div>
       <div id="input-row">
         <input id="teacher-input" type="text" autocomplete="off"
                placeholder="수업할 말을 입력하세요.  (@이름 지목,  /판서 …,  /활동 …,  /종료)">
