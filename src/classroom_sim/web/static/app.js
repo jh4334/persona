@@ -1344,6 +1344,14 @@ function insertCommand(cmd) {
   input.setSelectionRange(input.value.length, input.value.length);
 }
 
+/** 사람이 알아볼 수 있는 다운로드 파일명 — "리포트_6학년3반_2026-08-15.md" */
+function exportName(prefix, ext) {
+  const cls = (App.className || '수업').replace(/[\\/:*?"<>|\s]+/g, '');
+  const d = new Date();
+  const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${prefix}_${cls}_${ymd}.${ext}`;
+}
+
 function download(filename, content, type) {
   const blob = new Blob([content], { type: type || 'application/json;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -1408,13 +1416,14 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#btn-download').addEventListener('click', async () => {
     try {
       const t = await Api.transcript(App.sessionId);
-      download(`transcript_${App.sessionId}.json`, JSON.stringify(t, null, 2));
+      download(exportName('전사', 'json'), JSON.stringify(t, null, 2));
     } catch (e) {
       alert('전사를 내려받지 못했습니다: ' + e.message);
     }
   });
   $('#btn-download-md').addEventListener('click', () => {
-    download(`report_${App.sessionId}.md`, App.reportMd, 'text/markdown;charset=utf-8');
+    download(exportName('리포트', 'md'), App.reportMd, 'text/markdown;charset=utf-8');
   });
+  $('#btn-print').addEventListener('click', () => { window.print(); });
   $('#btn-restart').addEventListener('click', () => { location.reload(); });
 });

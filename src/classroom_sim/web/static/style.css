@@ -526,3 +526,22 @@ button.danger { color: var(--danger); }
 .backend-note {
   margin: -4px 0 10px; font-size: 12px; line-height: 1.55; opacity: .75;
 }
+
+/* ── 인쇄: 리포트 본문만, 흰 종이에 검은 글씨로 ── */
+@media print {
+  body { background: #fff !important; color: #000 !important; }
+  #screen-setup, #screen-stage, .report-actions, .saved-note { display: none !important; }
+  #screen-report { display: block !important; position: static !important; padding: 0 !important; }
+  .report-box { max-width: none; margin: 0; padding: 0; }
+  .md {
+    background: #fff !important; color: #000 !important;
+    border: none !important; box-shadow: none !important;
+    padding: 0 !important; font-size: 11.5pt; line-height: 1.6;
+  }
+  .md h1, .md h2, .md h3, .md b, .md strong { color: #000 !important; }
+  .md table { border-collapse: collapse; }
+  .md th, .md td { border: 1px solid #999 !important; color: #000 !important; background: #fff !important; }
+  .md a { color: #000 !important; text-decoration: none; }
+  .md h2 { page-break-after: avoid; }
+  .md table, .md blockquote { page-break-inside: avoid; }
+}
