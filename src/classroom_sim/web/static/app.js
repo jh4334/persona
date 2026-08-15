@@ -3,9 +3,9 @@
 
    구성
      1) API 래퍼        : 턴 단위 fetch (웹소켓 불필요)
-     2) 에셋 로더        : /static/assets/ 의 PNG를 시도하고, 없으면 코드로 그린
+     2) 에셋 로더        : /static/assets/vector/ 의 PNG를 시도하고, 없으면 코드로 그린
                           픽셀 폴백 스프라이트를 사용 (콘솔 경고 없음)
-     3) 캔버스 무대      : 336×256 논리 캔버스를 정수 배율로 확대 (image-rendering: pixelated)
+     3) 캔버스 무대      : 336×256 논리 캔버스를 4배 버퍼에서 부드럽게 렌더링
      4) UI 바인딩        : 셋업 / 무대 / 종료 리포트 3화면
      5) 미니 마크다운 렌더러 (리포트용, 외부 라이브러리 금지라 직접 구현)
    ============================================================ */
@@ -13,18 +13,30 @@
 
 /* ══════════════════════════ 0. 설정 ══════════════════════════ */
 
-const COLS = 4;                       // 책상 열 수
-const LOGICAL_W = 336;                // 논리 캔버스 가로 (픽셀아트 원본 해상도)
-const DESK_W = 40, DESK_H = 40;
-const COL_X = [48, 128, 208, 288];    // 각 열의 중심 x
-const ROW_Y0 = 110, ROW_GAP = 88;     // 첫 줄 책상 윗변 y, 줄 간격
-const SPRITE_W = 32, SPRITE_H = 48;
-const WALL_H = 46;                    // 앞쪽 벽 높이
+const CLASSROOM_LAYOUT = Object.freeze({
+  columns: 4, logicalWidth: 336, deskWidth: 40, deskHeight: 40,
+  columnCenters: Object.freeze([48, 128, 208, 288]), rowStart: 110, rowGap: 88,
+  spriteWidth: 32, spriteHeight: 48, wallHeight: 46, assetScale: 4, renderScale: 4,
+});
+const {
+  columns: COLS, logicalWidth: LOGICAL_W, deskWidth: DESK_W, deskHeight: DESK_H,
+  columnCenters: COL_X, rowStart: ROW_Y0, rowGap: ROW_GAP,
+  spriteWidth: SPRITE_W, spriteHeight: SPRITE_H, wallHeight: WALL_H,
+  assetScale: ASSET_SCALE, renderScale: RENDER_SCALE,
+} = CLASSROOM_LAYOUT;
 
-const ASSET_BASE = '/static/assets/';
+const ASSET_BASE = '/static/assets/vector/';
 const BUBBLE_MS = 6000;               // 말풍선 유지 시간
 const TRANSCRIPT_MAX = 400;           // 전사 로그 DOM 상한 (전체 기록은 서버가 보관)
 const CANVAS_FONT = '"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif';
+const CLASSROOM_TYPE = Object.freeze({
+  board: Object.freeze({ base: 3.4, min: 8, line: 4.2 }),
+  teacher: Object.freeze({ base: 3.2, min: 8 }),
+  studentName: Object.freeze({ base: 4.8, min: 10.5 }),
+  emoteFallback: Object.freeze({ base: 6, min: 12 }),
+  sleepCue: Object.freeze({ base: 3.6, min: 8 }),
+  bubble: Object.freeze({ base: 3.6, min: 10.5, clampMin: 11, clampMax: 18 }),
+});
 
 // 감정 → 이모지 (에셋 emotes.png가 있으면 시트 인덱스를 우선 사용)
 const EMOTION_ORDER = ['손듦', '졸림', '혼란', '몰입', '불안', '수다', '지루함', '흥분'];
@@ -51,6 +63,24 @@ const PALETTES = [
 ];
 const SKIN = ['#f6d3b0', '#e8bd94', '#d9a577'];
 const GROUP_COLORS = ['#ff8f4d', '#4dd0ff', '#b48cff', '#8bdc5a', '#ff7ab6', '#ffd54d'];
+const CLASSROOM_COLORS = Object.freeze({
+  floor: '#C8996B', floorDark: '#A8734F', cream: '#F2E8D5', creamShade: '#DCCCAD',
+  board: '#3E6B4F', boardLight: '#5C836A', wood: '#A96F45', woodLight: '#D5A56F',
+  woodDark: '#79543C', sky: '#84BED1', green: '#6FA77A', blue: '#6F9CC4',
+  blueDark: '#486E98', pink: '#D9899E', yellow: '#E8C568', white: '#FFFDF5', ink: '#493D39',
+});
+const STATUS_COLORS = Object.freeze({
+  comprehension: '#4DA3FF', interest: '#FFD23F', focus: '#5FD97A', selected: '#FFE066',
+  gaugeBackdrop: 'rgba(20,16,10,.55)', gaugeTrack: '#2C2216', name: '#FDF6E6',
+  labelBackdrop: 'rgba(0,0,0,.35)', labelStroke: 'rgba(0,0,0,.7)', boardText: '#EEF4EA',
+  teacherLabel: '#FFE9B0', sleepCue: '#CFD8FF',
+  bubbleInk: '#14161D', bubblePaper: '#FBF8EF', bubbleText: '#1B1E28',
+});
+const FALLBACK_COLORS = Object.freeze({
+  teacherHair: '#20242E', teacherShirt: '#5B6B8C', teacherPants: '#2B303D', ink: '#1A1420',
+  shoe: '#2A2A33', mouth: '#A5525A', blush: 'rgba(230,120,120,.55)',
+  collar: '#E8EBF5', ruler: '#D9C08A',
+});
 
 /* ══════════════════════════ 1. 앱 상태 ══════════════════════════ */
 
@@ -172,9 +202,16 @@ const Assets = {
     const png = Assets.images[key];
     let sprite;
     if (png) {
-      sprite = { img: png, frames: Math.max(1, Math.round(png.width / SPRITE_W)), fallback: false };
+      sprite = {
+        img: png,
+        frames: Math.max(1, Math.round(png.width / (SPRITE_W * ASSET_SCALE))),
+        sourceScale: ASSET_SCALE,
+        fallback: false,
+      };
     } else {
-      sprite = { img: buildFallbackSheet(paletteIndex, isTeacher), frames: 3, fallback: true };
+      sprite = {
+        img: buildFallbackSheet(paletteIndex, isTeacher), frames: 3, sourceScale: 1, fallback: true,
+      };
     }
     Assets.sprites[key] = sprite;
     return sprite;
@@ -200,10 +237,10 @@ function buildFallbackSheet(paletteIndex, isTeacher) {
 
 function drawFallbackChar(g, paletteIndex, frame, isTeacher) {
   const pal = isTeacher
-    ? { hair: '#20242e', shirt: '#5b6b8c', pants: '#2b303d' }
+    ? { hair: FALLBACK_COLORS.teacherHair, shirt: FALLBACK_COLORS.teacherShirt, pants: FALLBACK_COLORS.teacherPants }
     : PALETTES[paletteIndex % PALETTES.length];
   const skin = SKIN[paletteIndex % SKIN.length];
-  const ink = '#1a1420';                       // 외곽선
+  const ink = FALLBACK_COLORS.ink;              // 외곽선
   const bob = frame === 1 ? 1 : 0;             // idle 2프레임 흔들림
   const slump = frame === 2;                   // 집중 낮음: 몸을 기울인 자세
   const dx = slump ? 2 : 0;
@@ -216,8 +253,8 @@ function drawFallbackChar(g, paletteIndex, frame, isTeacher) {
   // 다리·신발 (책상에 가려 거의 보이지 않지만 서 있는 교사용으로 필요)
   B(11, 36, 5, 10, pal.pants);
   B(17, 36, 5, 10, pal.pants);
-  R(10, 45, 7, 2, '#2a2a33');
-  R(16, 45, 7, 2, '#2a2a33');
+  R(10, 45, 7, 2, FALLBACK_COLORS.shoe);
+  R(16, 45, 7, 2, FALLBACK_COLORS.shoe);
 
   // 몸통
   B(8 + dx, 21 + dy, 16, 15, pal.shirt);
@@ -245,14 +282,14 @@ function drawFallbackChar(g, paletteIndex, frame, isTeacher) {
     R(18 + dx, 13 + dy, 2, 2, ink);
   }
   // 입
-  R(14 + dx, 17 + dy, 4, 1, '#a5525a');
+  R(14 + dx, 17 + dy, 4, 1, FALLBACK_COLORS.mouth);
   // 볼 터치
-  R(10 + dx, 15 + dy, 2, 1, 'rgba(230,120,120,.55)');
-  R(21 + dx, 15 + dy, 2, 1, 'rgba(230,120,120,.55)');
+  R(10 + dx, 15 + dy, 2, 1, FALLBACK_COLORS.blush);
+  R(21 + dx, 15 + dy, 2, 1, FALLBACK_COLORS.blush);
 
   if (isTeacher) { // 교사 표식: 옷깃 + 손에 든 자
-    R(13, 21 + dy, 6, 2, '#e8ebf5');
-    R(26, 22 + dy, 2, 12, '#d9c08a');
+    R(13, 21 + dy, 6, 2, FALLBACK_COLORS.collar);
+    R(26, 22 + dy, 2, 12, FALLBACK_COLORS.ruler);
   }
 }
 
@@ -293,8 +330,9 @@ const Stage = {
     const rows = Math.max(1, Math.ceil(App.students.length / COLS));
     Stage.W = LOGICAL_W;
     Stage.H = ROW_Y0 + ROW_GAP * (rows - 1) + DESK_H + 32;
-    Stage.buf.width = Stage.W;
-    Stage.buf.height = Stage.H;
+    Stage.buf.width = Stage.W * RENDER_SCALE;
+    Stage.buf.height = Stage.H * RENDER_SCALE;
+    Stage.bctx.setTransform(RENDER_SCALE, 0, 0, RENDER_SCALE, 0, 0);
     Stage.dirty = true;
   },
 
@@ -356,78 +394,90 @@ const Stage = {
     UI.selectStudent(null);
   },
 
+  drawTile(g, index, x, y, width = 32, height = 32) {
+    const sourceSize = 32 * ASSET_SCALE;
+    g.drawImage(
+      Assets.images.tiles,
+      index * sourceSize,
+      0,
+      sourceSize,
+      sourceSize,
+      x,
+      y,
+      width,
+      height,
+    );
+  },
+
   /* ── 배경(교실) ── */
   drawRoom(g) {
     const W = Stage.W, H = Stage.H;
-    // 나무 바닥 (타일 16px, 판자 이음선)
-    g.fillStyle = '#b5824a';
-    g.fillRect(0, WALL_H, W, H - WALL_H);
-    for (let y = WALL_H; y < H; y += 16) {
-      g.fillStyle = (Math.floor(y / 16) % 2) ? '#ad7b45' : '#b98950';
-      g.fillRect(0, y, W, 16);
-      g.fillStyle = '#9a6a3a';
-      g.fillRect(0, y + 15, W, 1);
-      for (let x = ((y / 16) % 2) * 32; x < W; x += 64) g.fillRect(x, y, 1, 15);
+    const colors = CLASSROOM_COLORS;
+    if (Assets.images.tiles) {
+      for (let y = WALL_H, row = 0; y < H; y += 32, row++) {
+        for (let x = 0, col = 0; x < W; x += 32, col++) {
+          Stage.drawTile(g, (row + col) % 5 === 0 ? 1 : 0, x, y);
+        }
+      }
+      g.save();
+      g.beginPath(); g.rect(0, 0, W, WALL_H); g.clip();
+      for (let y = 0; y < WALL_H; y += 32) {
+        for (let x = 0; x < W; x += 32) Stage.drawTile(g, 2, x, y);
+      }
+      g.restore();
+    } else {
+      g.fillStyle = colors.floor; g.fillRect(0, WALL_H, W, H - WALL_H);
+      g.fillStyle = colors.cream; g.fillRect(0, 0, W, WALL_H);
     }
-    // 앞쪽 벽
-    g.fillStyle = '#d8d0bb'; g.fillRect(0, 0, W, WALL_H);
-    g.fillStyle = '#c6bda6'; g.fillRect(0, 0, W, 6);
-    g.fillStyle = '#8e846d'; g.fillRect(0, WALL_H - 4, W, 4);
-    g.fillStyle = '#7a7159'; g.fillRect(0, WALL_H - 1, W, 1);
+    g.fillStyle = colors.woodLight; g.fillRect(0, WALL_H - 4, W, 4);
+    g.fillStyle = colors.woodDark; g.fillRect(0, WALL_H - 1, W, 1);
 
-    // 칠판
     if (Assets.images.blackboard) {
-      g.drawImage(Assets.images.blackboard, 92, 6);
+      g.drawImage(Assets.images.blackboard, 92, 6, 192, 64);
     } else {
-      g.fillStyle = '#7a5a33'; g.fillRect(92, 6, 152, 34);       // 나무 틀
-      g.fillStyle = '#5f4325'; g.fillRect(92, 36, 152, 4);       // 분필받이
-      g.fillStyle = '#2c4a3b'; g.fillRect(95, 9, 146, 25);       // 초록 판
-      g.fillStyle = 'rgba(255,255,255,.10)'; g.fillRect(95, 9, 146, 2);
-      g.fillStyle = '#e8e8e0'; g.fillRect(97, 37, 6, 2); g.fillRect(105, 37, 4, 2);
+      g.fillStyle = colors.woodDark; g.fillRect(92, 6, 152, 34);
+      g.fillStyle = colors.wood; g.fillRect(92, 36, 152, 4);
+      g.fillStyle = colors.board; g.fillRect(95, 9, 146, 25);
+      g.fillStyle = colors.boardLight; g.fillRect(95, 9, 146, 2);
+      g.fillStyle = colors.white; g.fillRect(97, 37, 6, 2); g.fillRect(105, 37, 4, 2);
     }
-    // 창문
-    g.fillStyle = '#e7eef5'; g.fillRect(8, 8, 40, 30);
-    g.fillStyle = '#96cfee'; g.fillRect(11, 11, 34, 24);
-    g.fillStyle = '#bfe4f7'; g.fillRect(11, 11, 34, 8);
-    g.fillStyle = '#e7eef5'; g.fillRect(27, 11, 2, 24); g.fillRect(11, 22, 34, 2);
-    g.fillStyle = '#a9b0bb'; g.fillRect(8, 38, 40, 2);
-    // 게시판
-    g.fillStyle = '#8a6b45'; g.fillRect(286, 6, 42, 34);
-    g.fillStyle = '#c69a63'; g.fillRect(289, 9, 36, 28);
-    const notes = [['#f2f0d8', 292, 12], ['#f7c6c6', 305, 12], ['#cfe3f7', 292, 24], ['#d8f0cb', 305, 24]];
-    notes.forEach(([c, x, y]) => { g.fillStyle = c; g.fillRect(x, y, 11, 9); });
-    // 게시판 옆 시계
-    g.fillStyle = '#f0f0f0'; g.fillRect(262, 12, 12, 12);
-    g.fillStyle = '#2a2a33'; g.fillRect(267, 14, 1, 5); g.fillRect(267, 18, 4, 1);
+    if (Assets.images.tiles) {
+      Stage.drawTile(g, 3, 8, 7, 40, 32);
+      Stage.drawTile(g, 4, 286, 6, 42, 34);
+      Stage.drawTile(g, 6, 10, 50, 28, 28);
+      Stage.drawTile(g, 5, 304, 50, 28, 28);
+    } else {
+      g.fillStyle = colors.white; g.fillRect(8, 8, 40, 30);
+      g.fillStyle = colors.sky; g.fillRect(11, 11, 34, 24);
+      g.fillStyle = colors.woodDark; g.fillRect(286, 6, 42, 34);
+      g.fillStyle = colors.woodLight; g.fillRect(289, 9, 36, 28);
+      g.fillStyle = colors.green; g.fillRect(16, 52, 12, 17);
+      g.fillStyle = colors.blue; g.fillRect(306, 52, 24, 26);
+    }
+    g.fillStyle = colors.white; g.fillRect(262, 12, 12, 12);
+    g.fillStyle = colors.ink; g.fillRect(267, 14, 1, 5); g.fillRect(267, 18, 4, 1);
 
-    // 교탁
     if (Assets.images.desk_teacher) {
-      g.drawImage(Assets.images.desk_teacher, 148, 50);
+      g.drawImage(Assets.images.desk_teacher, 148, 50, 64, 48);
     } else {
-      g.fillStyle = '#6a4a2a'; g.fillRect(148, 50, 56, 18);
-      g.fillStyle = '#c9954f'; g.fillRect(148, 50, 56, 5);
-      g.fillStyle = '#4e361e'; g.fillRect(152, 68, 4, 4); g.fillRect(196, 68, 4, 4);
+      g.fillStyle = colors.woodDark; g.fillRect(148, 50, 56, 18);
+      g.fillStyle = colors.woodLight; g.fillRect(148, 50, 56, 5);
+      g.fillStyle = colors.ink; g.fillRect(152, 68, 4, 4); g.fillRect(196, 68, 4, 4);
     }
-    // 화분 (소품)
-    g.fillStyle = '#8c5a3c'; g.fillRect(16, 60, 12, 9);
-    g.fillStyle = '#4f9a52'; g.fillRect(18, 52, 8, 8); g.fillRect(15, 55, 4, 4); g.fillRect(25, 55, 4, 4);
-    // 사물함 (우측 뒤)
-    g.fillStyle = '#9aa2b5'; g.fillRect(306, 52, 24, 26);
-    g.fillStyle = '#7d8598'; g.fillRect(306, 52, 24, 2); g.fillRect(318, 52, 1, 26);
-    g.fillStyle = '#5c6377'; g.fillRect(312, 62, 2, 2); g.fillRect(322, 62, 2, 2);
   },
 
   drawDesk(g, s, sid) {
     const x = s.cx - DESK_W / 2, y = s.deskTop;
     if (Assets.images.desk_student) {
-      g.drawImage(Assets.images.desk_student, x, y);
+      g.drawImage(Assets.images.desk_student, x, y, DESK_W, DESK_H);
     } else {
-      g.fillStyle = '#3f2c19'; g.fillRect(x - 1, y - 1, DESK_W + 2, DESK_H + 2);
-      g.fillStyle = '#c9954f'; g.fillRect(x, y, DESK_W, 5);          // 상판
-      g.fillStyle = '#a87a3c'; g.fillRect(x, y + 5, DESK_W, 4);      // 서랍
-      g.fillStyle = '#6a4a2a'; g.fillRect(x, y + 9, DESK_W, DESK_H - 9);
-      g.fillStyle = '#4e361e'; g.fillRect(x + 3, y + DESK_H, 3, 4); g.fillRect(x + DESK_W - 6, y + DESK_H, 3, 4);
-      g.fillStyle = '#f2efe4'; g.fillRect(x + 6, y + 1, 12, 3);      // 책 한 권
+      const colors = CLASSROOM_COLORS;
+      g.fillStyle = colors.ink; g.fillRect(x - 1, y - 1, DESK_W + 2, DESK_H + 2);
+      g.fillStyle = colors.woodLight; g.fillRect(x, y, DESK_W, 5);
+      g.fillStyle = colors.wood; g.fillRect(x, y + 5, DESK_W, 4);
+      g.fillStyle = colors.woodDark; g.fillRect(x, y + 9, DESK_W, DESK_H - 9);
+      g.fillStyle = colors.ink; g.fillRect(x + 3, y + DESK_H, 3, 4); g.fillRect(x + DESK_W - 6, y + DESK_H, 3, 4);
+      g.fillStyle = colors.white; g.fillRect(x + 6, y + 1, 12, 3);
     }
     // 모둠 테두리
     const grp = App.groups[sid];
@@ -438,22 +488,22 @@ const Stage = {
     }
     // 선택 표시
     if (App.selected === sid) {
-      g.strokeStyle = '#ffe066'; g.lineWidth = 1;
+      g.strokeStyle = STATUS_COLORS.selected; g.lineWidth = 1;
       g.strokeRect(x - 4.5, s.spriteY - 4.5, DESK_W + 9, s.deskTop + DESK_H + 4 - s.spriteY + 5);
     }
   },
 
   drawGauges(g, s, st) {
     const bars = [
-      [st.comprehension, '#4da3ff'],
-      [st.interest, '#ffd23f'],
-      [st.focus, '#5fd97a'],
+      [st.comprehension, STATUS_COLORS.comprehension],
+      [st.interest, STATUS_COLORS.interest],
+      [st.focus, STATUS_COLORS.focus],
     ];
     const w = 26, x = s.cx - w / 2;
     let y = s.deskTop + DESK_H + 5;
     bars.forEach(([v, c]) => {
-      g.fillStyle = 'rgba(20,16,10,.55)'; g.fillRect(x - 1, y - 1, w + 2, 4);
-      g.fillStyle = '#2c2216'; g.fillRect(x, y, w, 2);
+      g.fillStyle = STATUS_COLORS.gaugeBackdrop; g.fillRect(x - 1, y - 1, w + 2, 4);
+      g.fillStyle = STATUS_COLORS.gaugeTrack; g.fillRect(x, y, w, 2);
       g.fillStyle = c; g.fillRect(x, y, Math.round(w * clamp(v, 0, 100) / 100), 2);
       y += 4;
     });
@@ -461,7 +511,9 @@ const Stage = {
 
   drawCharacter(g, sprite, x, y, frame) {
     const f = Math.min(frame, sprite.frames - 1);
-    g.drawImage(sprite.img, f * SPRITE_W, 0, SPRITE_W, SPRITE_H, x, y, SPRITE_W, SPRITE_H);
+    const sourceScale = sprite.sourceScale || 1;
+    const sourceW = SPRITE_W * sourceScale, sourceH = SPRITE_H * sourceScale;
+    g.drawImage(sprite.img, f * sourceW, 0, sourceW, sourceH, x, y, SPRITE_W, SPRITE_H);
   },
 
   emotionKey(st) {
@@ -486,7 +538,7 @@ const Stage = {
     Stage.dirty = false;
     Stage._idleF = frameIdle; Stage._zF = zFrame; Stage._hadBubble = hasBubble;
 
-    g.imageSmoothingEnabled = false;
+    g.imageSmoothingEnabled = true;
     g.clearRect(0, 0, Stage.W, Stage.H);
     Stage.drawRoom(g);
 
@@ -507,9 +559,9 @@ const Stage = {
       Stage.drawGauges(g, s, st);
     });
 
-    // 논리 버퍼 → 화면 (정수 배율 확대, 보간 없음)
     const ctx = Stage.ctx, S = Stage.scale;
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.clearRect(0, 0, Stage.canvas.width, Stage.canvas.height);
     ctx.drawImage(Stage.buf, 0, 0, Stage.W * S, Stage.H * S);
 
@@ -529,23 +581,23 @@ const Stage = {
     const F = (base, minCss) => Math.round(Math.max(base * S, minCss * K));
     // 판서 내용 (칠판 위)
     if (App.boardText) {
-      const bf = F(3.4, 8);
+      const bf = F(CLASSROOM_TYPE.board.base, CLASSROOM_TYPE.board.min);
       ctx.save();
       ctx.beginPath(); ctx.rect(96 * S, 10 * S, 184 * S, 24 * S); ctx.clip();
       ctx.font = `${bf}px ${CANVAS_FONT}`;
-      ctx.fillStyle = '#eef4ea'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      wrapText(ctx, App.boardText, 188 * S, 12 * S, 178 * S, Math.max(4.2 * S, bf * 1.24), 3);
+      ctx.fillStyle = STATUS_COLORS.boardText; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      wrapText(ctx, App.boardText, 188 * S, 12 * S, 178 * S, Math.max(CLASSROOM_TYPE.board.line * S, bf * 1.24), 3);
       ctx.restore();
     }
     // 교사 이름표
-    const tf = F(3.2, 8);
+    const tf = F(CLASSROOM_TYPE.teacher.base, CLASSROOM_TYPE.teacher.min);
     ctx.font = `${tf}px ${CANVAS_FONT}`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
     const tw = Math.max(32 * S, ctx.measureText('교사').width + tf);
     const th = Math.max(6 * S, tf * 1.4);
-    ctx.fillStyle = 'rgba(0,0,0,.35)';
+    ctx.fillStyle = STATUS_COLORS.labelBackdrop;
     ctx.fillRect(128 * S - tw / 2, 60 * S, tw, th);
-    ctx.fillStyle = '#ffe9b0';
+    ctx.fillStyle = STATUS_COLORS.teacherLabel;
     ctx.fillText('교사', 128 * S, 60 * S + (th - tf) / 2);
 
     App.students.forEach((stu, i) => {
@@ -553,10 +605,10 @@ const Stage = {
       const st = App.states[stu.id] || {};
       // 이름표
       const ny = (s.deskTop + 25) * S;
-      ctx.font = `${F(4.8, 10.5)}px ${CANVAS_FONT}`;
+      ctx.font = `${F(CLASSROOM_TYPE.studentName.base, CLASSROOM_TYPE.studentName.min)}px ${CANVAS_FONT}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      ctx.fillStyle = App.selected === stu.id ? '#ffe066' : '#fdf6e6';
-      ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.lineWidth = Math.max(2, S * 0.7);
+      ctx.fillStyle = App.selected === stu.id ? STATUS_COLORS.selected : STATUS_COLORS.name;
+      ctx.strokeStyle = STATUS_COLORS.labelStroke; ctx.lineWidth = Math.max(2, S * 0.7);
       ctx.strokeText(stu.name, s.cx * S, ny);
       ctx.fillText(stu.name, s.cx * S, ny);
 
@@ -566,17 +618,27 @@ const Stage = {
       const idx = EMOTION_ORDER.indexOf(key);
       if (Assets.images.emotes && idx >= 0) {
         const es = Math.max(12 * S, 22 * K);
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(Assets.images.emotes, idx * 16, 0, 16, 16, ex - es / 2, ey - es * 0.67, es, es);
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(
+          Assets.images.emotes,
+          idx * 16 * ASSET_SCALE,
+          0,
+          16 * ASSET_SCALE,
+          16 * ASSET_SCALE,
+          ex - es / 2,
+          ey - es * 0.67,
+          es,
+          es,
+        );
       } else {
-        ctx.font = `${F(6, 12)}px ${CANVAS_FONT}`;
+        ctx.font = `${F(CLASSROOM_TYPE.emoteFallback.base, CLASSROOM_TYPE.emoteFallback.min)}px ${CANVAS_FONT}`;
         ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
         ctx.fillText(EMOTION_EMOJI[key] || '😐', ex - 3 * S, ey + 2 * S);
       }
       // 집중 급락 시 zzz
       if (st.focus !== undefined && st.focus < 25 && Math.floor(t / 700) % 2 === 0) {
-        ctx.font = `${F(3.6, 8)}px ${CANVAS_FONT}`;
-        ctx.fillStyle = '#cfd8ff'; ctx.textAlign = 'left';
+        ctx.font = `${F(CLASSROOM_TYPE.sleepCue.base, CLASSROOM_TYPE.sleepCue.min)}px ${CANVAS_FONT}`;
+        ctx.fillStyle = STATUS_COLORS.sleepCue; ctx.textAlign = 'left';
         ctx.fillText('z z', (s.cx - 18) * S, (s.spriteY + 4) * S);
       }
     });
@@ -599,7 +661,11 @@ const Stage = {
 /** 픽셀풍 말풍선 (꼬리 포함). x=꼬리 중심, yBottom=꼬리 끝 y
     K = 캔버스 내부 픽셀 / 표시 CSS 픽셀 (데스크톱 1, 모바일 >1) */
 function drawBubble(ctx, S, K, x, yBottom, text) {
-  const fs = Math.max(clamp(Math.round(3.6 * S), 11, 18), Math.round(10.5 * K));
+  const bubbleType = CLASSROOM_TYPE.bubble;
+  const fs = Math.max(
+    clamp(Math.round(bubbleType.base * S), bubbleType.clampMin, bubbleType.clampMax),
+    Math.round(bubbleType.min * K),
+  );
   ctx.font = `${fs}px ${CANVAS_FONT}`;
   // 모바일에서는 글자를 키우는 대신 폭도 넓히되, 무대를 다 가리지 않도록 캔버스의 60%로 제한
   const maxW = Math.min(Math.max(clamp(110 * S, 140, 300), 150 * K), ctx.canvas.width * 0.6);
@@ -613,19 +679,19 @@ function drawBubble(ctx, S, K, x, yBottom, text) {
   by = Math.max(2, by);
 
   const px = Math.max(2, Math.round(S * 0.7));      // 픽셀 테두리 두께
-  ctx.fillStyle = '#14161d';
+  ctx.fillStyle = STATUS_COLORS.bubbleInk;
   ctx.fillRect(bx - px, by - px, w + px * 2, h + px * 2);
-  ctx.fillStyle = '#fbf8ef';
+  ctx.fillStyle = STATUS_COLORS.bubblePaper;
   ctx.fillRect(bx, by, w, h);
   // 꼬리 (계단식 = 도트 느낌)
   const tipX = clamp(Math.round(x), bx + 6, bx + w - 12);
   for (let k = 0; k < 4; k++) {
-    ctx.fillStyle = '#14161d';
+    ctx.fillStyle = STATUS_COLORS.bubbleInk;
     ctx.fillRect(tipX - (4 - k) * px, by + h + k * px, (4 - k) * 2 * px, px);
-    ctx.fillStyle = '#fbf8ef';
+    ctx.fillStyle = STATUS_COLORS.bubblePaper;
     ctx.fillRect(tipX - (4 - k) * px + px, by + h + k * px - 1, ((4 - k) * 2 - 2) * px, px);
   }
-  ctx.fillStyle = '#1b1e28';
+  ctx.fillStyle = STATUS_COLORS.bubbleText;
   ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   lines.forEach((l, i) => ctx.fillText(l, bx + fs / 2, by + fs * 0.35 + i * lh));
 }
@@ -1172,9 +1238,21 @@ const UI = {
     const i = App.seatOf[id] || 0;
     const sprite = Assets.character('char_s' + String(i + 1).padStart(2, '0'), i, false);
     const pc = $('#dc-portrait').getContext('2d');
-    pc.imageSmoothingEnabled = false;
-    pc.clearRect(0, 0, SPRITE_W, SPRITE_H);
-    pc.drawImage(sprite.img, 0, 0, SPRITE_W, SPRITE_H, 0, 0, SPRITE_W, SPRITE_H);
+    pc.imageSmoothingEnabled = true;
+    pc.imageSmoothingQuality = 'high';
+    pc.clearRect(0, 0, SPRITE_W * ASSET_SCALE, SPRITE_H * ASSET_SCALE);
+    const sourceScale = sprite.sourceScale || 1;
+    pc.drawImage(
+      sprite.img,
+      0,
+      0,
+      SPRITE_W * sourceScale,
+      SPRITE_H * sourceScale,
+      0,
+      0,
+      SPRITE_W * ASSET_SCALE,
+      SPRITE_H * ASSET_SCALE,
+    );
   },
 
   /* ── 종료 리포트 ── */

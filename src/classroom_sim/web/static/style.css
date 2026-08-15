@@ -1,6 +1,6 @@
 /* ============================================================
    보이는 교실 — 스타일 (외부 폰트·CDN 없음, 시스템 폰트만 사용)
-   게더타운 느낌의 도트 UI: 각진 테두리, 픽셀 그림자, 낮은 채도의 어두운 크롬
+   운영 UI는 어두운 크롬을 유지하고 교실 캔버스는 따뜻한 플랫 벡터로 렌더링
    ============================================================ */
 
 :root {
@@ -21,6 +21,16 @@
   --font: "Malgun Gothic", "맑은 고딕", "AppleSDGothicNeo-Regular", "Apple SD Gothic Neo",
           "Noto Sans KR", "Nanum Gothic", system-ui, sans-serif;
   --mono: ui-monospace, "DejaVu Sans Mono", Consolas, monospace;
+  --classroom-radius: 10px;
+  --classroom-elevation: 0 0 0 1px #3a4162, 0 8px 24px rgba(0, 0, 0, .55);
+  --classroom-space-1: 2px;
+  --classroom-space-2: 4px;
+  --classroom-space-3: 6px;
+  --classroom-space-4: 8px;
+  --classroom-touch-sm: 36px;
+  --classroom-touch-md: 46px;
+  --classroom-type-label: 11px;
+  --classroom-type-body: 13px;
 }
 
 * { box-sizing: border-box; }
@@ -172,7 +182,7 @@ button.danger { color: var(--danger); }
   align-items: center;
   justify-content: center;
   min-height: 0;
-  padding: 8px;
+  padding: var(--classroom-space-4);
   background:
     repeating-linear-gradient(0deg,  rgba(255,255,255,.02) 0 1px, transparent 1px 16px),
     repeating-linear-gradient(90deg, rgba(255,255,255,.02) 0 1px, transparent 1px 16px),
@@ -181,10 +191,10 @@ button.danger { color: var(--danger); }
 }
 
 #classroom {
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
+  image-rendering: auto;
   border: 2px solid var(--line);
-  box-shadow: 0 0 0 1px #3a4162, 0 8px 24px rgba(0, 0, 0, .55);
+  border-radius: var(--classroom-radius);
+  box-shadow: var(--classroom-elevation);
   cursor: pointer;
   max-width: 100%;
   max-height: 100%;
@@ -213,10 +223,10 @@ button.danger { color: var(--danger); }
 
 .dc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .dc-avatar {
-  width: 34px; height: 50px; background: var(--panel-2);
+  width: 42px; height: 62px; background: var(--panel-2);
   border: 2px solid var(--line); display: inline-flex; align-items: center; justify-content: center;
 }
-#dc-portrait { image-rendering: pixelated; width: 32px; height: 48px; }
+#dc-portrait { image-rendering: auto; width: 40px; height: 60px; }
 .dc-head b { display: block; font-size: 15px; }
 .dc-head small { color: var(--text-dim); font-size: 11px; }
 #dc-close { margin-left: auto; align-self: flex-start; padding: 2px 7px; box-shadow: none; }
@@ -412,7 +422,7 @@ button.danger { color: var(--danger); }
   .dc-actions {
     position: sticky; bottom: 0;
     background: var(--panel);
-    padding: 8px 0 2px;
+    padding: var(--classroom-space-4) 0 var(--classroom-space-1);
     box-shadow: 0 -8px 10px -6px var(--panel);
   }
   .dc-actions button { min-height: 44px; font-size: 13px; }
@@ -421,18 +431,18 @@ button.danger { color: var(--danger); }
   /* 캔버스·명령바·입력줄을 채우고 남는 세로 공간은 전사 로그가 흡수한다
      (명령바와 입력줄 사이에 빈 공간이 생기지 않게) */
   #progress-panel {
-    display: flex; flex-direction: column; gap: 4px;
-    flex: 1 0 auto;
+    display: flex; flex-direction: column; gap: var(--classroom-space-2);
+    flex: 0 0 auto;
     height: auto;
-    padding: 6px 8px 0;
+    padding: var(--classroom-space-3) var(--classroom-space-4) 0;
   }
 
   #transcript {
-    flex: 1 0 auto;
-    height: 22vh;              /* 접힘(기본) */
-    min-height: 92px;
+    flex: 0 0 auto;
+    height: 18vh;
+    min-height: 80px;
     max-height: none;
-    font-size: 13px;
+    font-size: var(--classroom-type-body);
   }
   body.tr-expanded #transcript { height: 45vh; }
 
@@ -440,42 +450,41 @@ button.danger { color: var(--danger); }
     display: block; width: 100%;
     flex: 0 0 auto;
     min-height: 28px; padding: 3px;
-    font-size: 11px; letter-spacing: 4px;
+    font-size: var(--classroom-type-label); letter-spacing: var(--classroom-space-2);
     color: var(--text-dim); box-shadow: none;
   }
 
-  #composer { flex: 0 0 auto; gap: 4px; }
+  #composer { flex: 0 0 auto; gap: var(--classroom-space-2); min-width: 0; }
 
-  /* 명령바: 가로 스크롤 한 줄 */
   #cmd-bar {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
-    gap: 6px;
-    padding-bottom: 4px;
-    scrollbar-width: thin;
-    -webkit-overflow-scrolling: touch;
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: var(--classroom-space-2);
+    overflow: visible;
+    padding: 0;
   }
-  #cmd-bar::-webkit-scrollbar { height: 4px; }
-  #cmd-bar::-webkit-scrollbar-track { background: var(--line); }
-  #cmd-bar::-webkit-scrollbar-thumb { background: var(--line-soft); }
   #cmd-bar button {
-    flex: 0 0 auto;
-    min-width: 40px; min-height: 40px;
-    padding: 6px 12px; font-size: 12px;
+    min-width: 0; width: 100%; min-height: var(--classroom-touch-sm);
+    padding: var(--classroom-space-2) var(--classroom-space-1); font-size: var(--classroom-type-label);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .cmd-group { flex: 0 0 auto; }
-  .cmd-group select { min-height: 40px; font-size: 14px; padding: 4px 6px; }
+  .cmd-group { display: contents; }
+  .cmd-group select {
+    min-width: 0; width: 100%; min-height: var(--classroom-touch-sm);
+    font-size: var(--classroom-type-label); padding: var(--classroom-space-2) var(--classroom-space-1);
+  }
 
   /* 입력줄: 하단 고정 + iOS 안전영역 */
   #input-row {
     position: sticky; bottom: 0; z-index: 15;
     background: var(--panel);
-    padding: 6px 0 calc(8px + env(safe-area-inset-bottom));
+    padding: var(--classroom-space-3) 0 calc(var(--classroom-space-4) + env(safe-area-inset-bottom));
+    min-width: 0;
   }
-  #input-row input { min-height: 46px; }
-  #input-row button { min-width: 76px; min-height: 46px; padding: 9px 12px; }
+  #input-row input { min-width: 0; min-height: var(--classroom-touch-md); }
+  #input-row button { min-width: 68px; min-height: var(--classroom-touch-md); padding: 9px 10px; }
 
   /* --- 3. 리포트 --- */
   #screen-report { padding: 14px 10px 40px; }
