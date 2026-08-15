@@ -1,8 +1,11 @@
 from _common import ROOT, CHROMIUM
 """Cycle 9 verification: /healthz + structured logs."""
-import logging, sys, os, io
+import logging, shutil, sys, os, io
 sys.path.insert(0, f"{ROOT}/src")
 os.chdir(f"{ROOT}")
+
+# 다른 스위트가 남긴 세션 스냅샷이 복구되면 '세션 0개' 가정이 깨진다 — 깨끗하게 시작
+shutil.rmtree(f"{ROOT}/.sessions", ignore_errors=True)
 
 from fastapi.testclient import TestClient
 from classroom_sim.web import server
