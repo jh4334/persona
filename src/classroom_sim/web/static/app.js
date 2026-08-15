@@ -80,8 +80,21 @@ const isMobile = () => window.matchMedia(MOBILE_MQ).matches;
 
 /* ══════════════════════════ 2. API ══════════════════════════ */
 
+const API_TIMEOUT_MS = 320000;   // 느린 백엔드(codex) 감안 + 서버 타임아웃(300s)보다 여유
+
 async function api(path, options) {
-  const res = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, options));
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(path, Object.assign(
+      { headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal }, options));
+  } catch (e) {
+    clearTimeout(timer);
+    if (e.name === 'AbortError') throw new Error('응답이 너무 오래 걸려 요청을 중단했습니다. 네트워크와 서버 상태를 확인한 뒤 다시 시도해 주세요.');
+    throw new Error('서버에 연결하지 못했습니다. 서버가 켜져 있는지 확인해 주세요.');
+  }
+  clearTimeout(timer);
   if (!res.ok) {
     let detail = res.status + ' ' + res.statusText;
     try { const j = await res.json(); if (j.detail) detail = j.detail; } catch (e) { /* 무시 */ }
@@ -779,6 +792,11 @@ const UI = {
     const input = $('#teacher-input');
     const text = (rawText !== undefined ? rawText : input.value).trim();
     if (!text || App.busy || App.ended) return;
+    // 실수 방지: 종료는 한 번 더 확인 (리포트 생성 후에는 되돌릴 수 없음)
+    if (/^\/종료\b/.test(text)
+        && !window.confirm('수업을 종료하고 사후 리포트를 생성할까요?\n종료 후에는 수업을 이어갈 수 없습니다.')) {
+      return;
+    }
     input.value = '';
     UI.setBusy(true);
     try {
@@ -786,7 +804,8 @@ const UI = {
       UI.applyTurn(r);
       if (r.ended) await UI.showReport(r.report_markdown);
     } catch (e) {
-      UI.addLine('system', '오류', e.message);
+      UI.addLine('system', '오류', e.message + '  (입력한 내용은 입력창에 남겨 두었어요)');
+      if (!input.value) input.value = text;   // 쓰던 내용 유실 방지
     } finally {
       UI.setBusy(false);
       input.focus();
@@ -832,7 +851,20 @@ const UI = {
     $('#busy').hidden = !on;
     $('#btn-send').disabled = on;
     $('#teacher-input').disabled = on;
+    clearInterval(UI._busyTimer);
+    if (on) {
+      const t0 = Date.now();
+      const label = $('#busy');
+      const slow = App.backend !== 'mock';
+      const base = slow ? '학생들이 반응하는 중... (AI 백엔드는 턴당 수십 초 걸릴 수 있어요)' : '학생들이 반응하는 중...';
+      label.innerHTML = '<span class="dots"></span>' + base;
+      UI._busyTimer = setInterval(() => {
+        const sec = Math.floor((Date.now() - t0) / 1000);
+        if (sec >= 3) label.innerHTML = `<span class="dots"></span>${base} ${sec}초`;
+      }, 1000);
+    }
   },
+  _busyTimer: 0,
 
   /* ── 학생 상세 카드 ── */
   /** 모바일 바텀시트 열기/닫기 (데스크톱에서는 CSS상 아무 영향 없음) */
