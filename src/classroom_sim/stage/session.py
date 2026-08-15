@@ -13,12 +13,21 @@ from datetime import datetime
 from ..personas import Classroom, Student
 from . import analysis, director, incidents, student_agent
 from .backend import pack_payload
-from .state import ClassState, StudentState, TurnEvent, TurnResult, clamp
+from .state import PHASES, ClassState, StudentState, TurnEvent, TurnResult, clamp
 from .transcript import Transcript
 
 # 전사가 이 길이를 넘으면 앞부분을 요약으로 접는다.
 FOLD_THRESHOLD = 30
 FOLD_KEEP = 20
+
+def _safe_int(value, fallback: int) -> int:
+    """감독(LLM) 출력의 숫자 필드를 안전하게 정수로 바꾼다. '3분' 같은 문자열도 허용."""
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        m = re.search(r"-?\d+", str(value)) if value is not None else None
+        return int(m.group()) if m else fallback
+
 
 _HELP = (
     "사용 가능한 입력:\n"
@@ -232,17 +241,20 @@ class StageSession:
 
         # ---- 감독 1회 호출 ----
         result = self._call_director(action)
-        if result is None:
+        if not isinstance(result, dict):
             events.append(TurnEvent("무대", "system", "감독 호출에 실패해 이번 턴은 상태를 유지합니다."))
             return self._result(events)
 
-        self.state.minute += max(0, int(result.get("minute_delta", 1)))
-        phase = (result.get("phase") or self.state.phase).strip()
-        if phase:
+        # 감독 출력은 LLM 산출물이므로 형·범위를 모두 방어한다.
+        # 시간은 /시간 명령 외에는 한 턴에 크게 흐를 이유가 없다.
+        cap = max(15, _safe_int(action.get("minutes"), 0)) if kind == "time_skip" else 15
+        self.state.minute += min(cap, max(0, _safe_int(result.get("minute_delta", 1), 1)))
+        phase = str(result.get("phase") or "").strip()
+        if phase in PHASES:
             self.state.phase = phase
-        self._apply_updates(result.get("updates", []))
+        self._apply_updates(result.get("updates"))
 
-        narration = (result.get("narration") or "").strip()
+        narration = str(result.get("narration") or "").strip()
         if narration:
             events.append(TurnEvent("무대", "narration", narration))
             self._record("무대", "narration", narration)
@@ -251,7 +263,8 @@ class StageSession:
         if kind == "group_work":
             events.extend(self._run_group_talk(action.get("text", "")))
         else:
-            events.extend(self._run_speakers(result.get("speakers", []), action))
+            speakers = result.get("speakers")
+            events.extend(self._run_speakers(speakers if isinstance(speakers, list) else [], action))
 
         self._maybe_fold()
         return self._result(events)
@@ -286,17 +299,22 @@ class StageSession:
                 out[key] = action[key]
         return out
 
-    def _apply_updates(self, updates: list[dict]) -> None:
+    def _apply_updates(self, updates) -> None:
+        if not isinstance(updates, list):
+            return
         for u in updates:
-            sid = u.get("id")
-            st = self.state.students.get(sid)
+            if not isinstance(u, dict):
+                continue
+            st = self.state.students.get(u.get("id"))
             if st is None:
                 continue
-            st.comprehension = clamp(u.get("comprehension", st.comprehension))
-            st.interest = clamp(u.get("interest", st.interest))
-            st.focus = clamp(u.get("focus", st.focus))
-            st.emotion = (u.get("emotion") or st.emotion).strip() or st.emotion
-            st.visible_action = (u.get("visible_action") or "").strip()
+            st.comprehension = clamp(_safe_int(u.get("comprehension", st.comprehension), st.comprehension))
+            st.interest = clamp(_safe_int(u.get("interest", st.interest), st.interest))
+            st.focus = clamp(_safe_int(u.get("focus", st.focus), st.focus))
+            emotion = str(u.get("emotion") or "").strip()
+            if emotion:
+                st.emotion = emotion[:12]          # 상태표·캔버스 표시가 깨지지 않게 자른다
+            st.visible_action = str(u.get("visible_action") or "").strip()[:80]
 
     # -- 교사 행동 기록 --
 
@@ -364,6 +382,8 @@ class StageSession:
         events: list[TurnEvent] = []
         seen: set[str] = set()
         for spec in speakers[:3]:
+            if not isinstance(spec, dict):
+                continue
             sid = spec.get("id")
             if sid not in self.students or sid in seen:
                 continue
@@ -376,7 +396,7 @@ class StageSession:
                     system_prefix=self._system_prefix,
                     student=student,
                     state=st,
-                    cue=spec.get("cue", "그 학생답게 반응해라."),
+                    cue=str(spec.get("cue") or "그 학생답게 반응해라."),
                     perspective=self.transcript.perspective_for(sid),
                     nominated=(action.get("target") == sid),
                     minute=self.state.minute,
@@ -390,8 +410,10 @@ class StageSession:
 
     def _emit_student(self, sid: str, spoken: dict) -> list[TurnEvent]:
         events: list[TurnEvent] = []
-        utterance = (spoken.get("utterance") or "").strip()
-        act = (spoken.get("action") or "").strip()
+        if not isinstance(spoken, dict):
+            spoken = {}
+        utterance = str(spoken.get("utterance") or "").strip()
+        act = str(spoken.get("action") or "").strip()
         if utterance:
             events.append(TurnEvent(sid, "student_say", utterance))
             self._record(sid, "student_say", utterance)
