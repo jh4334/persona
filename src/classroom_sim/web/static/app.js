@@ -793,7 +793,7 @@ const UI = {
     const text = (rawText !== undefined ? rawText : input.value).trim();
     if (!text || App.busy || App.ended) return;
     // 실수 방지: 종료는 한 번 더 확인 (리포트 생성 후에는 되돌릴 수 없음)
-    if (/^\/종료\b/.test(text)
+    if (/^\/종료(\s|$)/.test(text)
         && !window.confirm('수업을 종료하고 사후 리포트를 생성할까요?\n종료 후에는 수업을 이어갈 수 없습니다.')) {
       return;
     }
