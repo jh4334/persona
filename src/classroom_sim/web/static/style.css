@@ -96,6 +96,33 @@ body[data-screen="report"] #screen-report { display: block; }
 }
 .link-btn:hover { background: none; color: var(--text); }
 
+/* --- 지난 수업 기록 --- */
+.past-box {
+  margin-top: 16px; padding-top: 12px; border-top: 2px solid var(--line);
+}
+.past-box > summary {
+  cursor: pointer; font-size: 12px; color: var(--text-dim); list-style: none;
+}
+.past-box > summary::-webkit-details-marker { display: none; }
+.past-box > summary::before { content: '▸ '; }
+.past-box[open] > summary::before { content: '▾ '; }
+.past-box > summary b { color: var(--accent); }
+
+.past-list { margin-top: 8px; max-height: 30vh; overflow-y: auto; }
+.past-item { display: flex; gap: 4px; margin-bottom: 4px; }
+.past-open {
+  flex: 1; min-width: 0; text-align: left; padding: 7px 9px;
+  background: var(--panel-2); box-shadow: none;
+}
+.past-open:hover { background: #313754; }
+.past-title { display: block; font-size: 12px; }
+.past-sub {
+  display: block; margin-top: 1px; font-size: 10px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.past-meta { display: block; margin-top: 3px; font-size: 9px; color: var(--text-dim); }
+.past-del { flex: 0 0 auto; padding: 7px 9px; box-shadow: none; }
+
 /* 셋업 화면 하단의 계정 표시 — 눈에 띄지 않되 찾을 수 있게 */
 .account-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;

@@ -103,6 +103,8 @@ const App = {
   reportMd: '',
   seatOf: {},             // id → 좌석 index
   classrooms: [],         // 셋업 화면의 학급 목록 (내 학급 여부 판단용)
+  past: [],               // 지난 수업 기록 목록
+  pastTranscript: null,   // 지난 기록을 열어 본 경우의 전사 (서버 조회 대신 사용)
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -310,6 +312,9 @@ const Api = {
   classrooms: () => api('/api/classrooms'),
   lessons: () => api('/api/lessons'),
   dimensions: () => api('/api/dimensions'),
+  reports: () => api('/api/reports'),
+  report: (id) => api('/api/reports/' + encodeURIComponent(id)),
+  deleteReport: (id) => api('/api/reports/' + encodeURIComponent(id), { method: 'DELETE' }),
   createClassroom: (jsonText) => api('/api/classrooms',
     { method: 'POST', body: JSON.stringify({ json_text: jsonText }) }),
   deleteClassroom: (id) => api('/api/classrooms/' + encodeURIComponent(id), { method: 'DELETE' }),
@@ -921,6 +926,60 @@ const UI = {
     }
     $('#sel-backend').addEventListener('change', UI.updateBackendNote);
     UI.updateBackendNote();
+    UI.loadPast();
+  },
+
+  /* ── 지난 수업 기록 ── */
+
+  /** 끝난 수업을 다시 열어 볼 수 있게 목록으로 보여 준다 */
+  async loadPast() {
+    let rows;
+    try { rows = await Api.reports(); } catch (e) { return; }   // 없으면 조용히 접어 둔다
+    App.past = rows || [];
+    const box = $('#past-box');
+    if (!App.past.length) { box.hidden = true; return; }
+    box.hidden = false;
+    $('#past-count').textContent = App.past.length;
+    $('#past-list').innerHTML = App.past.map((r) => `
+      <div class="past-item">
+        <button type="button" class="past-open" data-id="${esc(r.id)}">
+          <span class="past-title">${esc(r.class_name || '수업')}</span>
+          <span class="past-sub">${esc(r.lesson_title || '')}</span>
+          <span class="past-meta">${fmtDate(r.created_at)} · ${r.turns}턴 · ${r.minutes}분</span>
+        </button>
+        <button type="button" class="past-del danger" data-id="${esc(r.id)}"
+                title="이 기록 삭제" aria-label="이 기록 삭제">✕</button>
+      </div>`).join('');
+  },
+
+  /** 지난 리포트를 리포트 화면에 그대로 띄운다 */
+  async openPast(id) {
+    try {
+      const r = await Api.report(id);
+      App.reportMd = r.markdown || '';
+      App.className = r.class_name || '';
+      App.lessonTitle = r.lesson_title || '';
+      App.pastTranscript = r.transcript || [];
+      App.sessionId = null;                 // 끝난 수업이라 서버에 물어볼 것이 없다
+      $('#report-body').innerHTML = mdToHtml(App.reportMd)
+        + `<p class="saved-note">📁 지난 수업 기록 — ${esc(fmtDate(r.created_at))}`
+        + ` · ${r.turns}턴 · ${r.minutes}분</p>`;
+      document.body.dataset.screen = 'report';
+      $('#screen-report').scrollTop = 0;
+    } catch (e) {
+      UI.setupError('수업 기록을 열지 못했습니다: ' + e.message);
+    }
+  },
+
+  async deletePast(id) {
+    const r = (App.past || []).find((x) => x.id === id);
+    if (!confirm(`'${(r && r.class_name) || '이 수업'}' 기록을 지울까요? 되돌릴 수 없습니다.`)) return;
+    try {
+      await Api.deleteReport(id);
+      await UI.loadPast();
+    } catch (e) {
+      UI.setupError('기록을 지우지 못했습니다: ' + e.message);
+    }
   },
 
   /** 내 학급은 위 묶음, 샘플은 아래 묶음으로 나눠 보여 준다 */
@@ -1771,6 +1830,16 @@ function insertCommand(cmd) {
 }
 
 /** 사람이 알아볼 수 있는 다운로드 파일명 — "리포트_6학년3반_2026-08-15.md" */
+/** epoch 초 → "8월 18일 15:03" (올해가 아니면 연도까지) */
+function fmtDate(sec) {
+  if (!sec) return '';
+  const d = new Date(sec * 1000);
+  const now = new Date();
+  const y = d.getFullYear() === now.getFullYear() ? '' : `${d.getFullYear()}년 `;
+  const p = (n) => String(n).padStart(2, '0');
+  return `${y}${d.getMonth() + 1}월 ${d.getDate()}일 ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 function exportName(prefix, ext) {
   const cls = (App.className || '수업').replace(/[\\/:*?"<>|\s]+/g, '');
   const d = new Date();
@@ -1881,6 +1950,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#btn-cls-cancel').addEventListener('click', () => UI.toggleClassroomEditor(false));
   $('#btn-cls-save').addEventListener('click', UI.saveClassroom);
   $('#btn-cls-del').addEventListener('click', UI.deleteClassroom);
+  $('#past-list').addEventListener('click', (e) => {
+    const open = e.target.closest('.past-open');
+    if (open) { UI.openPast(open.dataset.id); return; }
+    const del = e.target.closest('.past-del');
+    if (del) UI.deletePast(del.dataset.id);
+  });
   $('#tab-form').addEventListener('click', () => UI.clsTab('form'));
   $('#tab-json').addEventListener('click', () => UI.clsTab('json'));
   $('#btn-bd-add').addEventListener('click', () => { Builder.addStudent(); Builder.render(); });
@@ -1952,7 +2027,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   $('#btn-download').addEventListener('click', async () => {
     try {
-      const t = await Api.transcript(App.sessionId);
+      // 지난 기록을 열어 본 경우엔 이미 전사를 들고 있다 (세션은 이미 끝났다)
+      const t = App.sessionId ? await Api.transcript(App.sessionId) : (App.pastTranscript || []);
       download(exportName('전사', 'json'), JSON.stringify(t, null, 2));
     } catch (e) {
       alert('전사를 내려받지 못했습니다: ' + e.message);

@@ -38,6 +38,7 @@ from pydantic import BaseModel
 from ..personas import Classroom, load_classroom, parse_classroom
 from . import auth as _auth
 from .classrooms import ClassroomError, ClassroomLibrary
+from .reports import ReportError, ReportLibrary
 from .store import make_store, supabase_config
 
 # ---------------------------------------------------------------------------
@@ -140,6 +141,9 @@ STORE = make_store(SNAP_DIR)
 
 # 학급 서가 — 저장소의 샘플(읽기 전용) + 교사가 만든 내 학급(사용자별)
 LIBRARY = ClassroomLibrary(ROOT, ROOT / ".classrooms")
+
+# 수업 기록 — 끝난 수업의 리포트·전사 (디스크에 늘 남기고, 설정 시 Supabase에도)
+REPORTS = ReportLibrary(ROOT / "reports" / "stage")
 
 
 def _persist_session(sid: str, rec: SessionRecord) -> None:
@@ -426,6 +430,32 @@ def delete_classroom(classroom_id: str, request: Request) -> dict:
     return {"deleted": classroom_id}
 
 
+@app.get("/api/reports")
+def list_reports(request: Request) -> list[dict]:
+    """지난 수업 기록 목록 (본문 없이 요약만)."""
+    user = _current_user(request)
+    return REPORTS.list(user.id if user else None)
+
+
+@app.get("/api/reports/{report_id}")
+def get_report(report_id: str, request: Request) -> dict:
+    user = _current_user(request)
+    try:
+        return REPORTS.get(user.id if user else None, report_id)
+    except ReportError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete("/api/reports/{report_id}")
+def delete_report(report_id: str, request: Request) -> dict:
+    user = _current_user(request)
+    try:
+        REPORTS.delete(user.id if user else None, report_id)
+    except ReportError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"deleted": report_id}
+
+
 @app.get("/api/dimensions")
 def list_dimensions(request: Request) -> dict:
     """학급 만들기 폼이 쓰는 속성 카탈로그 (personas/schema/dimensions.json).
@@ -566,26 +596,34 @@ def _title_of(path: Path) -> str:
     return path.stem
 
 
-def _save_report(rec: "SessionRecord", session_id: str, report: str) -> str | None:
-    """리포트·전사를 서버에도 남긴다 (브라우저를 닫아도 유실되지 않게). 실패해도 응답은 막지 않는다."""
+def _save_report(rec: "SessionRecord", session_id: str, report: str) -> tuple[str | None, str | None]:
+    """리포트·전사를 서버에 남긴다 (브라우저를 닫아도 유실되지 않게).
+
+    (표시용 파일 경로, 기록 id)를 돌려준다. 실패해도 응답은 막지 않는다 —
+    교사는 이미 화면에서 리포트를 보고 있고, 내려받을 수도 있다.
+    """
     try:
-        out_dir = ROOT / "reports" / "stage"
-        out_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         cname = re.sub(r"[^\w가-힣-]+", "_", rec.classroom.class_name).strip("_") or "학급"
         base = f"{stamp}_{cname}_{session_id[:8]}"
-        (out_dir / f"{base}.md").write_text(report or "", encoding="utf-8")
         try:
-            transcript = rec.session.transcript_json()
-            (out_dir / f"{base}.transcript.json").write_text(
-                json.dumps(_serialize(transcript), ensure_ascii=False, indent=2), encoding="utf-8")
+            transcript = _serialize(rec.session.transcript_json())
         except Exception:
-            pass
-        log.info("report saved: session=%s path=%s", session_id[:8], f"{base}.md")
-        return str((out_dir / f"{base}.md").relative_to(ROOT))
+            transcript = []
+        state = getattr(rec.session, "state", None)
+        rid = REPORTS.save({
+            "user_id": rec.user_id or "",
+            "session_id": session_id,
+            "class_name": rec.classroom.class_name,
+            "lesson_title": _title_of(ROOT / rec.meta["lesson_path"]) if rec.meta.get("lesson_path") else "",
+            "turns": int(getattr(state, "turn", 0) or 0),
+            "minutes": int(getattr(state, "minute", 0) or 0),
+        }, report or "", transcript, base)
+        log.info("report saved: session=%s path=%s id=%s", session_id[:8], f"{base}.md", rid[:8])
+        return f"reports/stage/{base}.md", rid
     except Exception:
         log.exception("report save failed: session=%s", session_id[:8])
-        return None
+        return None, None
 
 
 @app.post("/api/sessions/{session_id}/turn")
@@ -626,7 +664,7 @@ def take_turn(session_id: str, req: TurnReq, request: Request) -> dict:
     if getattr(result, "ended", False):
         _drop_snapshot(session_id)   # 종료된 수업은 리포트로 남으므로 스냅샷은 정리
         if getattr(result, "report_markdown", None):
-            out["report_saved_path"] = _save_report(rec, session_id, result.report_markdown)
+            out["report_saved_path"], out["report_id"] = _save_report(rec, session_id, result.report_markdown)
     else:
         _persist_session(session_id, rec)
     return out
@@ -663,7 +701,8 @@ def end_session(session_id: str, request: Request) -> dict:
         rec.touch()
         rec.lock.release()
     _drop_snapshot(session_id)
-    return {"report_markdown": report, "report_saved_path": _save_report(rec, session_id, report)}
+    saved_path, rid = _save_report(rec, session_id, report)
+    return {"report_markdown": report, "report_saved_path": saved_path, "report_id": rid}
 
 
 # 정적 파일 (앱 라우트 뒤에 마운트해야 /api 경로를 가리지 않는다)

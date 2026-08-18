@@ -3,8 +3,8 @@
 -- 적용 방법: Supabase 대시보드 → SQL Editor → 이 파일 내용을 붙여넣고 Run.
 -- 여러 번 실행해도 안전하다 (전부 if not exists / or replace).
 --
--- 세션 스냅샷(stage_sessions)과 교사가 만든 학급(classrooms)을 담는다.
--- 전사·리포트는 아직 서버 파일로만 남는다.
+-- 세션 스냅샷(stage_sessions), 교사가 만든 학급(classrooms),
+-- 끝난 수업의 리포트·전사(reports)를 담는다.
 
 -- ---------------------------------------------------------------------------
 -- 세션 스냅샷
@@ -92,6 +92,40 @@ alter table public.classrooms enable row level security;
 
 drop policy if exists "own classrooms" on public.classrooms;
 create policy "own classrooms" on public.classrooms
+    for all
+    to authenticated
+    using (user_id = auth.uid())
+    with check (user_id = auth.uid());
+
+-- ---------------------------------------------------------------------------
+-- 수업 기록 (끝난 수업의 리포트·전사)
+-- ---------------------------------------------------------------------------
+--
+-- 서버는 리포트를 디스크(`reports/stage/`)에도 늘 남긴다. 여기 넣는 이유는
+-- 컨테이너를 재배포해도 남기고, 교사가 화면에서 지난 수업을 다시 볼 수 있게
+-- 하기 위해서다.
+
+create table if not exists public.reports (
+    id                uuid primary key,
+    user_id           uuid references auth.users(id) on delete cascade,
+    session_id        text,
+    class_name        text,
+    lesson_title      text,
+    turns             integer default 0,
+    minutes           integer default 0,
+    markdown          text not null,
+    transcript        jsonb,
+    created_at_epoch  double precision not null,   -- 목록 정렬용
+    created_at        timestamptz not null default now()
+);
+
+create index if not exists reports_user_idx
+    on public.reports (user_id, created_at_epoch desc);
+
+alter table public.reports enable row level security;
+
+drop policy if exists "own reports" on public.reports;
+create policy "own reports" on public.reports
     for all
     to authenticated
     using (user_id = auth.uid())

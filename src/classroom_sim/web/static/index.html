@@ -149,6 +149,11 @@
     <p id="setup-error" class="error" hidden></p>
     <p class="notice">※ 시뮬레이션 결과이며 실제 학생의 예측·평가·선발에 사용할 수 없습니다.</p>
 
+    <details id="past-box" class="past-box" hidden>
+      <summary>지난 수업 기록 <b id="past-count"></b></summary>
+      <div id="past-list" class="past-list"></div>
+    </details>
+
     <div id="account-row" class="account-row" hidden>
       <span id="account-email"></span>
       <button id="btn-logout" class="link-btn" type="button">로그아웃</button>
@@ -281,7 +286,7 @@
       <button id="btn-download" class="btn-primary">전사 JSON 내려받기</button>
       <button id="btn-download-md">리포트 마크다운 저장</button>
       <button id="btn-print">인쇄 / PDF 저장</button>
-      <button id="btn-restart">새 수업</button>
+      <button id="btn-restart">처음 화면으로</button>
     </div>
     <article id="report-body" class="md"></article>
   </div>
