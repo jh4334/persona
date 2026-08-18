@@ -24,7 +24,7 @@ import time
 import uuid
 from pathlib import Path
 
-from .store import SAVE_TIMEOUT, supabase_config
+from .store import SAVE_TIMEOUT, Remote, remote_config
 
 log = logging.getLogger("classroom_sim.web")
 
@@ -124,23 +124,37 @@ class DiskReports:
 class SupabaseReports:
     name = "supabase"
 
-    def __init__(self, url: str, key: str, table: str = "reports") -> None:
+    def __init__(self, remote: Remote) -> None:
         import httpx
 
-        self.endpoint = f"{url.rstrip('/')}/rest/v1/{table}"
-        self._client = httpx.Client(
-            headers={"apikey": key, "Authorization": f"Bearer {key}",
-                     "Content-Type": "application/json"},
-            timeout=SAVE_TIMEOUT,
-        )
+        self.remote = remote
+        self.endpoint = f"{remote.url}/rest/v1/{remote.table}"
+        self._client = httpx.Client(timeout=SAVE_TIMEOUT)
+
+    def _h(self, token, extra=None):
+        h = self.remote.headers(token)
+        if extra:
+            h.update(extra)
+        return h
 
     def _check(self, r, what: str):
         if r.status_code >= 400:
             raise ReportError(f"수업 기록 {what}에 실패했습니다 ({r.status_code}).")
         return r
 
-    def save(self, meta: dict, markdown: str, transcript: object) -> None:
-        self._check(self._client.post(self.endpoint, json={
+    def _call(self, what: str, fn):
+        """연결 자체가 안 될 때도 원시 예외 대신 알아들을 수 있는 말로 바꾼다."""
+        import httpx
+
+        try:
+            return self._check(fn(), what)
+        except httpx.HTTPError as exc:
+            log.warning("%s %s 실패(연결): %s", "수업 기록", what, exc)
+            raise ReportError(f"저장소에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.") from exc
+
+    def save(self, meta: dict, markdown: str, transcript: object,
+             token: str | None = None) -> None:
+        self._call("저장", lambda: self._client.post(self.endpoint, json={
             "id": meta["id"],
             "user_id": meta.get("user_id") or None,
             "session_id": meta.get("session_id", ""),
@@ -151,17 +165,19 @@ class SupabaseReports:
             "markdown": (markdown or "")[:MAX_MD_BYTES],
             "transcript": transcript if transcript is not None else [],
             "created_at_epoch": float(meta.get("created_at") or time.time()),
-        }, headers={"Prefer": "return=minimal"}), "저장")
+        }, headers=self._h(token, {"Prefer": "return=minimal"})))
 
-    def list(self, user_id: str) -> list[dict]:
-        r = self._check(self._client.get(
+    def list(self, user_id: str, token: str | None = None) -> list[dict]:
+        r = self._call("목록 조회", lambda: self._client.get(
             f"{self.endpoint}?select=id,class_name,lesson_title,turns,minutes,created_at_epoch"
-            f"&user_id=eq.{user_id}&order=created_at_epoch.desc&limit={MAX_LIST}"), "목록 조회")
+            f"&user_id=eq.{user_id}&order=created_at_epoch.desc&limit={MAX_LIST}",
+            headers=self._h(token)))
         return [_row({**row, "created_at": row.get("created_at_epoch")}) for row in r.json() or []]
 
-    def get(self, user_id: str, rid: str) -> dict | None:
-        r = self._check(self._client.get(
-            f"{self.endpoint}?select=*&id=eq.{rid}&user_id=eq.{user_id}&limit=1"), "조회")
+    def get(self, user_id: str, rid: str, token: str | None = None) -> dict | None:
+        r = self._call("조회", lambda: self._client.get(
+            f"{self.endpoint}?select=*&id=eq.{rid}&user_id=eq.{user_id}&limit=1",
+            headers=self._h(token)))
         rows = r.json() or []
         if not rows:
             return None
@@ -171,10 +187,10 @@ class SupabaseReports:
         out["transcript"] = row.get("transcript") or []
         return out
 
-    def delete(self, user_id: str, rid: str) -> bool:
-        r = self._check(self._client.delete(
+    def delete(self, user_id: str, rid: str, token: str | None = None) -> bool:
+        r = self._call("삭제", lambda: self._client.delete(
             f"{self.endpoint}?id=eq.{rid}&user_id=eq.{user_id}",
-            headers={"Prefer": "return=representation"}), "삭제")
+            headers=self._h(token, {"Prefer": "return=representation"})))
         try:
             return bool(r.json())
         except Exception:
@@ -191,13 +207,12 @@ class ReportLibrary:
 
     def __init__(self, disk_dir: Path) -> None:
         self.disk = DiskReports(disk_dir)
-        cfg = supabase_config()
+        cfg = remote_config("reports")
         self.remote: SupabaseReports | None = None
         if cfg:
-            url, key, _ = cfg
             try:
-                self.remote = SupabaseReports(url, key)
-                log.info("수업 기록 저장소: Supabase (reports 테이블)")
+                self.remote = SupabaseReports(cfg)
+                log.info("수업 기록 저장소: Supabase (reports 테이블, 인증 %s)", cfg.describe())
             except Exception as exc:
                 log.warning("Supabase 기록 저장소를 만들지 못했습니다 (디스크 사용): %s", exc)
 
@@ -205,33 +220,34 @@ class ReportLibrary:
     def name(self) -> str:
         return "disk+supabase" if self.remote else "disk"
 
-    def save(self, meta: dict, markdown: str, transcript: object, base: str) -> str:
+    def save(self, meta: dict, markdown: str, transcript: object, base: str,
+             token: str | None = None) -> str:
         """리포트를 남기고 기록 id를 돌려준다. 원격이 실패해도 디스크는 남는다."""
         meta = {**meta, "id": meta.get("id") or str(uuid.uuid4()),
                 "created_at": meta.get("created_at") or time.time()}
         self.disk.save(meta, markdown, transcript, base)
         if self.remote:
             try:
-                self.remote.save(meta, markdown, transcript)
+                self.remote.save(meta, markdown, transcript, token)
             except Exception as exc:
                 log.warning("수업 기록 원격 저장 실패 (디스크에는 남았습니다): %s", exc)
         return meta["id"]
 
-    def list(self, user_id: str | None) -> list[dict]:
+    def list(self, user_id: str | None, token: str | None = None) -> list[dict]:
         uid = user_id or ""
         if self.remote:
             try:
-                return self.remote.list(uid or "local")
+                return self.remote.list(uid or "local", token)
             except Exception as exc:
                 log.warning("수업 기록 원격 조회 실패 (디스크로 대체): %s", exc)
         return self.disk.list(uid)
 
-    def get(self, user_id: str | None, rid: str) -> dict:
+    def get(self, user_id: str | None, rid: str, token: str | None = None) -> dict:
         uid = user_id or ""
         got = None
         if self.remote:
             try:
-                got = self.remote.get(uid or "local", rid)
+                got = self.remote.get(uid or "local", rid, token)
             except Exception as exc:
                 log.warning("수업 기록 원격 열람 실패 (디스크로 대체): %s", exc)
         if got is None:
@@ -240,12 +256,12 @@ class ReportLibrary:
             raise ReportError("수업 기록을 찾을 수 없습니다.")
         return got
 
-    def delete(self, user_id: str | None, rid: str) -> None:
+    def delete(self, user_id: str | None, rid: str, token: str | None = None) -> None:
         uid = user_id or ""
         hit = self.disk.delete(uid, rid)
         if self.remote:
             try:
-                hit = self.remote.delete(uid or "local", rid) or hit
+                hit = self.remote.delete(uid or "local", rid, token) or hit
             except Exception as exc:
                 log.warning("수업 기록 원격 삭제 실패: %s", exc)
         if not hit:

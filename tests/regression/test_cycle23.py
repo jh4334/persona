@@ -109,9 +109,17 @@ print("④ 서가 생성·소유권·인원 상한 OK")
 ROWS: list[dict] = []
 
 
+AUTH_HEADERS: list[str] = []
+APIKEYS: list[str] = []
+
+
 class PG(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
+
+    def _note(self):
+        AUTH_HEADERS.append(self.headers.get("Authorization") or "")
+        APIKEYS.append(self.headers.get("apikey") or "")
 
     def _send(self, code, obj=None):
         blob = json.dumps(obj if obj is not None else []).encode()
@@ -126,6 +134,7 @@ class PG(BaseHTTPRequestHandler):
         return q.get("user_id", ["eq."])[0].split(".", 1)[1]
 
     def do_GET(self):
+        self._note()
         q = parse_qs(urlparse(self.path).query)
         uid = self._uid()
         rows = [r for r in ROWS if r["user_id"] == uid]
@@ -135,11 +144,13 @@ class PG(BaseHTTPRequestHandler):
         self._send(200, [{"id": r["id"], "data": r["data"]} for r in rows])
 
     def do_POST(self):
+        self._note()
         n = int(self.headers.get("Content-Length") or 0)
         ROWS.append(json.loads(self.rfile.read(n)))
         self._send(201)
 
     def do_DELETE(self):
+        self._note()
         q = parse_qs(urlparse(self.path).query)
         cid, uid = q["id"][0].split(".", 1)[1], self._uid()
         hit = [r for r in ROWS if r["id"] == cid and r["user_id"] == uid]
@@ -172,7 +183,6 @@ lib2.delete("uA", made2["id"])
 assert ROWS == []
 print("⑤ Supabase 저장소 CRUD·소유권 OK")
 
-pg.shutdown()
 for k in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"):
     os.environ.pop(k, None)
 
@@ -260,14 +270,20 @@ def tok(sub):
     return f"{h}.{p}.{b64(hmac.new(SECRET.encode(), f'{h}.{p}'.encode(), hashlib.sha256).digest())}"
 
 
-os.environ.update({"SUPABASE_URL": "http://127.0.0.1:1", "SUPABASE_ANON_KEY": "a",
+# anon 키만 준다 — service_role 없이 RLS 모드로 도는지 함께 확인한다
+ROWS.clear()
+os.environ.update({"SUPABASE_URL": PG_URL, "SUPABASE_ANON_KEY": "anon-key",
                    "SUPABASE_JWT_SECRET": SECRET, "AUTH_REQUIRED": "1"})
 shutil.rmtree(f"{ROOT}/.classrooms", ignore_errors=True)
 importlib.reload(server)
+assert server.remote_config().needs_token, "service_role 없이도 원격을 쓰는 모드가 아님"
 c3 = TestClient(server.app)
 HA, HB = {"Authorization": f"Bearer {tok('teacherA')}"}, {"Authorization": f"Bearer {tok('teacherB')}"}
 
 ca = c3.post("/api/classrooms", json={"json_text": TEXT}, headers=HA).json()["id"]
+# 사용자 JWT가 그대로 Supabase 인증에 쓰였는지 (service_role 키가 아니라)
+assert AUTH_HEADERS and AUTH_HEADERS[-1].startswith("Bearer eyJ"), AUTH_HEADERS[-1][:30]
+assert "anon-key" == APIKEYS[-1], APIKEYS[-1]
 assert [x["id"] for x in c3.get("/api/classrooms", headers=HA).json() if x["mine"]] == [ca]
 assert [x for x in c3.get("/api/classrooms", headers=HB).json() if x["mine"]] == [], "남의 학급이 보임"
 assert c3.post("/api/sessions", json={"classroom_id": ca, "lesson_path": "lessons/ratio_and_rate.md",
@@ -276,6 +292,7 @@ assert c3.delete(f"/api/classrooms/{ca}", headers=HB).status_code == 404
 assert c3.post("/api/classrooms", json={"json_text": TEXT}).status_code == 401
 print("⑪ 로그인 시 사용자별 학급 격리 OK")
 
+pg.shutdown()
 for k in ("SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_JWT_SECRET", "AUTH_REQUIRED"):
     os.environ.pop(k, None)
 

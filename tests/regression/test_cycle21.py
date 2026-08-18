@@ -46,9 +46,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         assert self.headers.get("apikey") == "test-key", "apikey 헤더 누락"
         assert self.headers.get("Authorization") == "Bearer test-key", "Authorization 누락"
-        assert "merge-duplicates" in (self.headers.get("Prefer") or ""), "upsert Prefer 누락"
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        ROWS[body["id"]] = body          # 같은 id면 덮어씀 = upsert
+        if self.path.endswith("/stage_sessions"):
+            assert "merge-duplicates" in (self.headers.get("Prefer") or ""), "upsert Prefer 누락"
+            ROWS[body["id"]] = body      # 같은 id면 덮어씀 = upsert
+        # 다른 테이블(reports 등)은 이 스위트의 관심사가 아니므로 받기만 한다
         self.send_response(201)
         self.end_headers()
 
@@ -57,11 +59,16 @@ class Handler(BaseHTTPRequestHandler):
         if self._fail_if_asked():
             return
         q = parse_qs(urlparse(self.path).query)
-        gt = float(q["saved_at"][0].split(".", 1)[1])
-        limit = int(q["limit"][0])
-        rows = [r for r in ROWS.values() if r["saved_at"] > gt]
-        rows.sort(key=lambda r: r["saved_at"], reverse=True)
-        out = [{"id": r["id"], "payload": r["payload"]} for r in rows[:limit]]
+        if "id" in q:                                   # 단건 조회 (지연 복구)
+            rid = q["id"][0].split(".", 1)[1]
+            out = [{"id": r["id"], "payload": r["payload"]}
+                   for r in ROWS.values() if r["id"] == rid]
+        else:
+            gt = float(q["saved_at"][0].split(".", 1)[1])
+            limit = int(q["limit"][0])
+            rows = [r for r in ROWS.values() if r["saved_at"] > gt]
+            rows.sort(key=lambda r: r["saved_at"], reverse=True)
+            out = [{"id": r["id"], "payload": r["payload"]} for r in rows[:limit]]
         blob = json.dumps(out).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -115,9 +122,13 @@ assert rows[0][1]["snapshot"]["state"]["turn"] == 9
 assert sb.load_all(newer_than=now + 1.5) == [("bbb", ROWS["bbb"]["payload"])], "TTL 필터 미적용"
 print("② select 최신순·TTL 필터 OK")
 
+assert sb.load_one("bbb")["snapshot"]["state"]["turn"] == 9, "단건 조회 실패"
+assert sb.load_one("없는세션") is None
+print("③ 단건 조회(지연 복구용) OK")
+
 sb.delete("aaa")
 assert list(ROWS) == ["bbb"], ROWS
-print("③ delete OK")
+print("④ delete OK")
 
 # ---------------------------------------------------------------------------
 # ④ MirrorStore: 양쪽에 쓰고, 한쪽이 죽어도 계속된다
@@ -131,13 +142,13 @@ mirror = MirrorStore([disk, SupabaseStore(BASE, "test-key")])
 mirror.save("s1", snap(now, turn=3))
 assert (tmpdir / "s1.json").is_file(), "디스크에 안 씀"
 assert "s1" in ROWS, "Supabase에 안 씀"
-print("④ 이중 기록 OK")
+print("⑤ 이중 기록 OK")
 
 FAIL_NEXT["n"] = 1                        # Supabase 한 번 실패
 mirror.save("s2", snap(now + 1, turn=4))  # 예외가 밖으로 새면 안 된다
 assert (tmpdir / "s2.json").is_file(), "원격 실패가 디스크 기록까지 막음"
 assert "s2" not in ROWS
-print("⑤ 원격 실패해도 디스크 기록 계속·예외 미전파 OK")
+print("⑥ 원격 실패해도 디스크 기록 계속·예외 미전파 OK")
 
 # ---------------------------------------------------------------------------
 # ⑥ 병합 시 더 최근 스냅샷이 이긴다
@@ -150,12 +161,12 @@ disk.save("s4", snap(now + 9, turn=77))
 SupabaseStore(BASE, "test-key").save("s4", snap(now + 5, turn=1))    # 원격이 구버전
 merged = dict(mirror.load_all(newer_than=now - 100))
 assert merged["s4"]["snapshot"]["state"]["turn"] == 77, merged["s4"]
-print("⑥ 병합 시 최신 스냅샷 우선 OK")
+print("⑦ 병합 시 최신 스냅샷 우선 OK")
 
 FAIL_NEXT["n"] = 1
 merged = dict(mirror.load_all(newer_than=now - 100))
 assert "s1" in merged, "원격 조회 실패 시 디스크 결과까지 잃음"
-print("⑦ 원격 조회 실패해도 디스크로 복구 OK")
+print("⑧ 원격 조회 실패해도 디스크로 복구 OK")
 
 # ---------------------------------------------------------------------------
 # ⑧ 환경변수 구성
@@ -174,7 +185,7 @@ assert make_store(tmpdir).name == "disk+supabase"
 
 os.environ["SUPABASE_URL"] = "obmlsijdaknzwktplklr.supabase.co"    # 스킴 빠짐
 assert supabase_config() is None, "잘못된 URL을 걸러내지 못함"
-print("⑧ 환경변수 구성·오설정 방어 OK")
+print("⑨ 환경변수 구성·오설정 방어 OK")
 
 # ---------------------------------------------------------------------------
 # ⑨ 서버 전체 경로: SUPABASE_* 설정 상태에서 세션 생성·턴·복구
@@ -201,22 +212,24 @@ assert sid in ROWS, "턴 후 원격 스냅샷 없음"
 remote_turn = ROWS[sid]["payload"]["snapshot"]["state"]["turn"]
 assert remote_turn >= 1, ROWS[sid]
 
-# 디스크만 날리고 재시작 → 원격 스냅샷만으로 되살아나야 한다 (다른 서버로 옮긴 상황)
+# 디스크만 날리고 재시작 → 원격 스냅샷만으로 되살아나야 한다 (다른 서버로 옮긴 상황).
+# 기동 시에는 원격을 훑지 않는다 (그러려면 RLS를 우회하는 service_role 키가 필요하다).
+# 주인이 그 수업을 요청하는 순간 자기 토큰으로 하나만 되살린다 — 지연 복구.
 shutil.rmtree(f"{ROOT}/.sessions", ignore_errors=True)
 importlib.reload(server)
-assert sid in server.SESSIONS, "원격 스냅샷으로 복구하지 못함"
-assert server.SESSIONS[sid].session.state.turn == remote_turn
+assert sid not in server.SESSIONS, "기동 시 원격을 통째로 긁어옴 (지연 복구여야 한다)"
 client2 = TestClient(server.app)
 r = client2.post(f"/api/sessions/{sid}/turn", json={"input": "이어서 해봅시다"})
 assert r.status_code == 200, r.text
 assert r.json()["turn"] == remote_turn + 1, r.json()
-print("⑨ 디스크 없이 원격 스냅샷만으로 서버 이전 복구 OK (turn %d→%d)"
+assert sid in server.SESSIONS, "요청 후에도 복구되지 않음"
+print("⑩ 디스크 없이 원격 스냅샷만으로 서버 이전 복구 OK — 지연 복구 (turn %d→%d)"
       % (remote_turn, remote_turn + 1))
 
 # ⑩ 종료하면 원격 스냅샷도 지워진다
 client2.post(f"/api/sessions/{sid}/turn", json={"input": "/종료"})
 assert sid not in ROWS, "종료 후 원격 스냅샷이 남음"
-print("⑩ 종료 시 원격 정리 OK")
+print("⑪ 종료 시 원격 정리 OK")
 
 srv.shutdown()
 shutil.rmtree(tmpdir, ignore_errors=True)

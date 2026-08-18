@@ -1,6 +1,7 @@
 # Supabase 연결 가이드 (v0.6)
 
-1단계 세션 스냅샷 · 2단계 로그인 · 3단계 내 학급 만들기 · 4단계 수업 기록.
+1단계 세션 스냅샷 · 2단계 로그인 · 3단계 내 학급 만들기 · 4단계 수업 기록 ·
+5단계 service_role 키 없애기.
 
 ---
 
@@ -33,12 +34,22 @@ Supabase 대시보드 → **SQL Editor** → `db/schema.sql` 내용을 붙여넣
 
 | 키 | 용도 | 취급 |
 |---|---|---|
-| `anon` (public) | 브라우저용 | 공개돼도 됨. RLS가 막는다. **1단계에서는 안 씀** |
-| `service_role` | 서버용 | **절대 공개 금지.** RLS를 우회한다 |
+| `anon` (public) | 브라우저 로그인 + 서버의 RLS 모드 | 공개돼도 됨. RLS가 막는다 |
+| `service_role` | 로그인 없이 쓸 때의 서버 인증 | **절대 공개 금지.** RLS를 우회한다 |
 
-1단계에서 서버는 `service_role` 키를 쓴다. 아직 로그인이 없어 `user_id`를
-채울 주체가 없기 때문이다. 인증이 붙는 2단계에서 사용자 JWT + `anon` 키로
-바꾸면 `service_role` 키 자체가 필요 없어진다.
+서버는 두 가지 방식 중 하나로 Supabase에 접근한다.
+
+| 모드 | 조건 | 어떻게 인증하나 |
+|---|---|---|
+| **RLS 모드** (권장) | 로그인을 켠다 (`SUPABASE_ANON_KEY`) | 요청마다 그 사용자의 JWT. 행 접근은 데이터베이스 정책이 판단 |
+| **service 모드** | 로그인 없이 쓴다 | `service_role` 키로 RLS 우회 |
+
+**로그인을 켠다면 `service_role` 키는 필요 없다.** 서버에 두는 키가 공개용 anon
+하나뿐이라, 서버가 털려도 남의 데이터를 꺼낼 수 있는 열쇠가 없다. 두 키가 다
+설정돼 있으면 더 안전한 RLS 모드를 쓴다.
+
+로그인 없이 혼자(같은 Wi-Fi) 쓰는 운영에서는 사용자 JWT가 존재하지 않으므로
+`service_role` 키가 유일한 방법이다.
 
 > ⚠️ **`service_role` 키를 채팅·이슈·커밋에 붙여넣지 말 것.** 아래처럼 환경변수로만
 > 전달한다. `.env`는 이미 `.gitignore`에 있다.
@@ -65,8 +76,11 @@ SUPABASE_SERVICE_ROLE_KEY=...
 | 변수 | 필수 | 기본값 |
 |---|---|---|
 | `SUPABASE_URL` | ✅ | — (없으면 디스크만 사용) |
-| `SUPABASE_KEY` / `SUPABASE_SERVICE_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | ✅ | — |
+| `SUPABASE_ANON_KEY` | RLS 모드에 필요 | — |
+| `SUPABASE_KEY` / `SUPABASE_SERVICE_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | service 모드에 필요 | — |
 | `SUPABASE_TABLE` | | `stage_sessions` |
+
+둘 중 하나는 있어야 한다. `curl /healthz`의 `remote_auth`로 어느 모드인지 확인할 수 있다.
 
 ## 4. 연결 확인
 
@@ -159,18 +173,19 @@ Supabase 기본 메일 발송기는 **시간당 2~3통**으로 제한된 테스�
 
 | 값 | 어디서 쓰나 |
 |---|---|
-| `anon` (public) | 브라우저 로그인 화면. **공개돼도 안전** |
+| `anon` (public) | 브라우저 로그인 화면 + 서버의 Supabase 접근. **공개돼도 안전** |
 | `JWT Secret` | 서버가 토큰 서명을 직접 검증 (Settings → API → JWT Settings) |
-| `service_role` | 서버의 스냅샷 저장 (1단계) |
 
 ```bash
 export SUPABASE_URL=https://obmlsijdaknzwktplklr.supabase.co
 export SUPABASE_ANON_KEY=<anon 키>
-export SUPABASE_JWT_SECRET=<JWT Secret>          # 선택 — 없으면 원격 확인으로 동작
-export SUPABASE_SERVICE_ROLE_KEY=<service_role>  # 1단계 스냅샷 저장용
+export SUPABASE_JWT_SECRET=<JWT Secret>   # 선택 — 없으면 원격 확인으로 동작
 
 PYTHONPATH=src python -m classroom_sim.web --port 8000
 ```
+
+**`service_role` 키는 넣지 않는다.** 로그인을 켰으면 사용자 JWT로 충분하다
+(RLS 모드). `curl /healthz` → `"remote_auth":"RLS(사용자 토큰)"` 로 확인한다.
 
 | 변수 | 없으면 |
 |---|---|
@@ -326,8 +341,56 @@ select cron.schedule('purge-old-reports', '0 19 * * 0',
 
 전사(`transcript`)가 용량의 대부분이다. 40턴 수업 하나가 대략 수십 KB다.
 
+---
+
+# 5단계 — service_role 키 없애기 (RLS 모드)
+
+로그인을 켰다면 서버에 `service_role` 키를 둘 이유가 없다. 요청마다 그 사용자의
+JWT로 Supabase에 접근하고, 어떤 행에 손댈 수 있는지는 데이터베이스의 RLS 정책이
+판단한다. 서버가 털려도 남의 데이터를 꺼낼 수 있는 열쇠가 없다는 뜻이다.
+
+## 걸림돌이었던 것: 기동 시 전체 복구
+
+원래는 서버가 켜질 때 원격의 모든 세션을 훑어 되살렸다. 그 시점에는 어떤
+사용자의 요청도 없어 쓸 수 있는 토큰이 없고, 남의 것까지 읽어야 하니 RLS를
+우회하는 키가 반드시 필요했다.
+
+**지연 복구**로 바꿨다. 기동 시에는 로컬 디스크만 본다. 원격에만 있는 세션(다른
+서버에서 진행하던 수업)은 **그 주인이 요청하는 순간** 자기 토큰으로 하나만
+되살린다. 남이 같은 세션을 요청하면 RLS가 막아 아무것도 돌아오지 않는다.
+
+교사가 체감하는 동작은 같다 — 브라우저에서 '이어하기'를 누르는 순간이 곧 첫
+요청이기 때문이다.
+
+## 설정
+
+`service_role` 키를 **빼면** 된다.
+
+```bash
+export SUPABASE_URL=https://obmlsijdaknzwktplklr.supabase.co
+export SUPABASE_ANON_KEY=<anon 키>
+export SUPABASE_JWT_SECRET=<JWT Secret>
+# SUPABASE_SERVICE_ROLE_KEY 는 설정하지 않는다
+```
+
+```bash
+curl -s http://127.0.0.1:8000/healthz
+# → "remote_auth":"RLS(사용자 토큰)"    ← service_role 없이 도는 중
+# → "remote_auth":"service_role"        ← 아직 키가 남아 있다
+```
+
+두 키가 다 설정돼 있으면 **RLS 모드가 이긴다** — 더 안전한 쪽이 기본이어야 한다.
+
+## 언제 service_role이 필요한가
+
+로그인 없이 쓰는 운영(같은 Wi-Fi 안에서 혼자)에서는 사용자 JWT가 존재하지
+않으므로 `service_role` 키가 유일한 방법이다. 이 경우 RLS 정책의 `auth.uid()`도
+비어 있어 실질적인 보호는 "서버 외부에 노출하지 않는 것"뿐이다.
+
+`tests/regression/test_cycle26.py`가 RLS를 흉내내는 가짜 PostgREST로 전 과정을
+검증한다 — anon 키만으로 학급·세션·기록이 오가는지, 남의 세션이 지연 복구되지
+않는지, 끝까지 anon 외의 키가 쓰이지 않는지까지.
+
 ## 아직 안 된 것 (다음)
 
-- 서버가 스냅샷·학급·기록 저장에 아직 `service_role` 키를 쓴다. 기동 시 전체
-  세션을 복구해야 해서인데, 사용자별 지연 복구로 바꾸면 이 키를 없앨 수 있다.
 - ChatGPT 앱(MCP) 경로 — `docs/specs/v0.6_chatgpt_app.md`
