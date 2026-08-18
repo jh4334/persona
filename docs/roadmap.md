@@ -13,7 +13,7 @@
 [완료] v0.3  교실 무대 엔진 (터미널판) — stage/ 모듈, mock/anthropic 백엔드
 [완료] v0.4  웹 UI — 보이는 교실 — 게더타운풍 도트 교실 (web/), 에셋 요청서
 [완료] v0.5  살아있는 교실 — 모둠 대화·돌발 카드 6종·수업 분석 (A/B 비교·학기 누적은 미착수)
-[기획완료] v0.6  ChatGPT 앱 — 각자 구독으로 쓰는 도트 교실 (docs/specs/v0.6_chatgpt_app.md)
+[완료] v0.6  클라우드 전환 — 로그인·내 학급·수업 기록·MCP (docs/supabase_setup.md, docs/chatgpt_app_setup.md)
 [4단계] v1.0  배포판 (로컬 모델, 기관 배포)
 ```
 

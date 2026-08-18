@@ -31,12 +31,14 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..personas import Classroom, load_classroom, parse_classroom
 from . import auth as _auth
+from ..stage import incidents as _incidents
+from . import mcp as _mcp
 from .classrooms import ClassroomError, ClassroomLibrary
 from .reports import ReportError, ReportLibrary
 from .store import DiskStore, make_store, remote_config
@@ -488,6 +490,45 @@ def delete_classroom(classroom_id: str, request: Request) -> dict:
     except ClassroomError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"deleted": classroom_id}
+
+
+# ---------------------------------------------------------------------------
+# MCP — ChatGPT가 직접 무대를 진행하는 경로 (web/mcp.py)
+# ---------------------------------------------------------------------------
+
+MCP = _mcp.McpServer(LIBRARY, REPORTS, _incidents)
+
+
+@app.post("/mcp")
+async def mcp_endpoint(request: Request):
+    """MCP streamable HTTP 엔드포인트 (JSON-RPC 2.0).
+
+    ChatGPT 개발자 모드에 이 주소를 등록하면 도구 7종이 노출된다.
+    인증은 웹판과 같은 Bearer 토큰을 쓴다.
+    """
+    uid, token = _who(request)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(_mcp._error(None, -32700, "JSON을 해석하지 못했습니다."), status_code=400)
+
+    if isinstance(body, list):                      # 일괄 요청
+        out = [r for r in (_mcp.handle(b, MCP, uid, token) for b in body) if r is not None]
+        return JSONResponse(out) if out else Response(status_code=202)
+    res = _mcp.handle(body, MCP, uid, token)
+    if res is None:                                 # 알림에는 본문 없이 202
+        return Response(status_code=202)
+    return JSONResponse(res)
+
+
+@app.get("/mcp")
+def mcp_info() -> dict:
+    """브라우저로 열어 봤을 때의 안내 (MCP 자체는 POST를 쓴다)."""
+    return {"server": _mcp.SERVER_INFO, "protocolVersion": _mcp.PROTOCOL_VERSION,
+            "transport": "streamable-http (POST /mcp)",
+            "tools": [t["name"] for t in _mcp.TOOLS],
+            "auth": "required" if AUTH.required else "open",
+            "docs": "docs/specs/v0.6_chatgpt_app.md"}
 
 
 @app.get("/api/reports")
