@@ -40,13 +40,14 @@ try:
           const origFetch = window.fetch;
           window._origFetch = origFetch;
           let first = true;
-          window.fetch = (url, opts) => {
+          window.fetch = async (url, opts) => {
             if (first && String(url).includes('/turn')) {
               first = false;
-              // 서버로는 실제 전송하되 응답은 버리고 AbortError를 낸다 (클라이언트 타임아웃 재현)
-              origFetch(url, opts).catch(() => {});
-              const e = new DOMException('aborted', 'AbortError');
-              return Promise.reject(e);
+              // 재현할 상황: "서버는 턴을 끝냈는데 클라이언트가 기다리다 포기했다".
+              // 서버 처리가 끝난 것을 확인한 뒤 AbortError를 내야 경쟁 조건이 없다
+              // (기다리지 않고 바로 거부하면 재동기화가 처리 전 상태를 읽어 불안정해진다).
+              try { await origFetch(url, opts); } catch (e) {}
+              throw new DOMException('aborted', 'AbortError');
             }
             return origFetch(url, opts);
           };
