@@ -115,13 +115,15 @@ const isMobile = () => window.matchMedia(MOBILE_MQ).matches;
 
 const API_TIMEOUT_MS = 320000;   // 느린 백엔드(codex) 감안 + 서버 타임아웃(300s)보다 여유
 
-async function api(path, options) {
+async function api(path, options, _retried) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
   let res;
   try {
-    res = await fetch(path, Object.assign(
-      { headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal }, options));
+    const opts = Object.assign({ signal: ctrl.signal }, options);
+    opts.headers = Object.assign({ 'Content-Type': 'application/json' },
+                                 Auth.header(), (options || {}).headers);
+    res = await fetch(path, opts);
   } catch (e) {
     clearTimeout(timer);
     let err;
@@ -138,6 +140,11 @@ async function api(path, options) {
     throw err;
   }
   clearTimeout(timer);
+  if (res.status === 401 && !_retried) {
+    // 토큰이 만료됐을 수 있다 — 한 번만 조용히 갱신하고 재시도한다.
+    if (await Auth.refresh()) return api(path, options, true);
+    Auth.requireLogin('로그인이 만료되었습니다. 다시 로그인해 주세요.');
+  }
   if (!res.ok) {
     let detail = res.status + ' ' + res.statusText;
     try { const j = await res.json(); if (j.detail) detail = j.detail; } catch (e) { /* 무시 */ }
@@ -147,6 +154,156 @@ async function api(path, options) {
   }
   return res.json();
 }
+
+/* ══════════════════════════ 2-b. 로그인 (Supabase Auth) ══════════════════════════
+
+   서버가 인증을 요구하면(`/api/auth/config`) 로그인 화면을 먼저 보여준다.
+   브라우저는 인증에만 Supabase를 직접 부르고, 수업 데이터는 전부 우리 서버를
+   거친다. 그래서 여기 나가는 키는 공개해도 되는 anon 키뿐이다.
+
+   메일로 받은 링크를 누르면 토큰이 URL 조각(#access_token=...)으로 돌아온다.
+   링크가 막히는 환경(사내망·IP 주소 접속)을 위해 6자리 코드 입력도 함께 받는다.
+   ============================================================== */
+
+const AUTH_LS = 'cs_auth';
+
+const Auth = {
+  cfg: { required: false, url: '', anon_key: '' },
+  tok: null,          // {access_token, refresh_token, expires_at}
+  email: '',
+
+  header() {
+    return this.tok && this.tok.access_token
+      ? { Authorization: 'Bearer ' + this.tok.access_token } : {};
+  },
+
+  load() {
+    try { this.tok = JSON.parse(localStorage.getItem(AUTH_LS) || 'null'); }
+    catch (e) { this.tok = null; }
+  },
+  save(tok) {
+    this.tok = tok;
+    try {
+      if (tok) localStorage.setItem(AUTH_LS, JSON.stringify(tok));
+      else localStorage.removeItem(AUTH_LS);
+    } catch (e) { /* 프라이빗 모드 — 이번 탭에서만 유지 */ }
+  },
+
+  /** Supabase Auth REST 호출 (우리 서버가 아니라 Supabase로 직접) */
+  async sb(path, body, method) {
+    const res = await fetch(this.cfg.url + '/auth/v1' + path, {
+      method: method || 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: this.cfg.anon_key },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    let j = null;
+    try { j = await res.json(); } catch (e) { /* 본문 없는 응답 */ }
+    if (!res.ok) {
+      const msg = (j && (j.error_description || j.msg || j.message)) || ('오류 ' + res.status);
+      const err = new Error(msg);
+      err.code = res.status;
+      throw err;
+    }
+    return j;
+  },
+
+  /** 응답의 토큰 묶음을 만료 시각과 함께 보관 */
+  keep(j) {
+    if (!j || !j.access_token) return false;
+    this.save({
+      access_token: j.access_token,
+      refresh_token: j.refresh_token || '',
+      expires_at: j.expires_at ? j.expires_at * 1000
+                               : Date.now() + (j.expires_in || 3600) * 1000,
+    });
+    return true;
+  },
+
+  /** 만료된(또는 임박한) 토큰을 갱신. 성공하면 true */
+  async refresh() {
+    if (!this.cfg.required || !this.tok || !this.tok.refresh_token) return false;
+    try {
+      const j = await this.sb('/token?grant_type=refresh_token',
+                              { refresh_token: this.tok.refresh_token });
+      return this.keep(j);
+    } catch (e) {
+      this.save(null);
+      return false;
+    }
+  },
+
+  /** 메일로 로그인 링크 + 코드 보내기 */
+  sendCode(email) { return this.sb('/otp', { email, create_user: true }); },
+
+  /** 6자리 코드로 로그인 마무리 */
+  async verifyCode(email, code) {
+    const j = await this.sb('/verify', { email, token: code, type: 'email' });
+    return this.keep(j);
+  },
+
+  async signOut() {
+    try { await this.sb('/logout', {}, 'POST'); } catch (e) { /* 서버가 이미 지웠어도 무방 */ }
+    this.save(null);
+    location.reload();
+  },
+
+  /** 매직링크가 돌려준 URL 조각에서 토큰을 회수한다 */
+  takeFromHash() {
+    const h = location.hash || '';
+    if (h.indexOf('access_token=') < 0 && h.indexOf('error=') < 0) return null;
+    const q = new URLSearchParams(h.replace(/^#/, ''));
+    // 토큰이 주소창·기록에 남지 않게 즉시 지운다
+    history.replaceState(null, '', location.pathname + location.search);
+    if (q.get('error')) {
+      return { error: q.get('error_description') || q.get('error') };
+    }
+    this.keep({
+      access_token: q.get('access_token'),
+      refresh_token: q.get('refresh_token'),
+      expires_in: Number(q.get('expires_in') || 3600),
+    });
+    return { ok: true };
+  },
+
+  /** 앱 시작 전에 로그인 상태를 확정한다. 로그인 화면이 필요하면 true */
+  async boot() {
+    let cfg;
+    try { cfg = await api('/api/auth/config'); }
+    catch (e) { return false; }        // 서버가 답을 못 하면 기존처럼 진행
+    this.cfg = cfg;
+    if (!cfg.required) return false;
+
+    this.load();
+    const fromLink = this.takeFromHash();
+    if (fromLink && fromLink.error) {
+      this.requireLogin('로그인 링크가 만료되었거나 이미 사용되었습니다. 다시 시도해 주세요.');
+      return true;
+    }
+    if (this.tok && this.tok.expires_at && this.tok.expires_at - Date.now() < 60000) {
+      await this.refresh();
+    }
+    if (!this.tok) { this.requireLogin(); return true; }
+
+    let me;
+    try { me = await api('/api/auth/me'); } catch (e) { me = null; }
+    if (!me || !me.authenticated) { this.save(null); this.requireLogin(); return true; }
+    this.email = me.email || '';
+    return false;
+  },
+
+  requireLogin(message) {
+    document.body.dataset.screen = 'login';
+    if (message) this.note(message, true);
+  },
+
+  note(text, bad) {
+    const el = $('#login-note');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('bad', !!bad);
+    el.hidden = !text;
+  },
+};
 
 const Api = {
   classrooms: () => api('/api/classrooms'),
@@ -1531,7 +1688,83 @@ function download(filename, content, type) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+/* ══════════════════════════ 로그인 화면 동작 ══════════════════════════ */
+
+function initLogin() {
+  const emailEl = $('#login-email');
+  const codeStep = $('#login-code-step');
+  const sendBtn = $('#btn-login-send');
+
+  $('#login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = (emailEl.value || '').trim();
+    if (!email || email.indexOf('@') < 0) {
+      Auth.note('이메일 주소를 확인해 주세요.', true);
+      emailEl.focus();
+      return;
+    }
+    sendBtn.disabled = true;
+    const label = sendBtn.textContent;
+    sendBtn.textContent = '보내는 중...';
+    Auth.note('');
+    try {
+      await Auth.sendCode(email);
+      Auth.email = email;
+      codeStep.hidden = false;
+      emailEl.disabled = true;
+      Auth.note(`${email} 로 로그인 메일을 보냈습니다. 메일의 링크를 누르거나, 6자리 코드를 아래에 입력하세요.`);
+      $('#login-code').focus();
+    } catch (err) {
+      // 과도한 재시도는 Supabase가 막는다 — 그 이유를 그대로 보여 준다
+      Auth.note(err.code === 429
+        ? '요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.'
+        : ('로그인 메일을 보내지 못했습니다: ' + err.message), true);
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = label;
+    }
+  });
+
+  $('#btn-login-verify').addEventListener('click', async () => {
+    const code = ($('#login-code').value || '').trim();
+    if (!code) { Auth.note('메일로 받은 코드를 입력해 주세요.', true); return; }
+    const btn = $('#btn-login-verify');
+    btn.disabled = true;
+    Auth.note('');
+    try {
+      if (await Auth.verifyCode(Auth.email, code)) {
+        location.reload();     // 토큰을 확보했으니 깨끗한 상태로 다시 시작
+        return;
+      }
+      Auth.note('로그인에 실패했습니다. 코드를 다시 확인해 주세요.', true);
+    } catch (err) {
+      Auth.note('코드가 올바르지 않거나 만료되었습니다. 메일을 다시 요청해 주세요.', true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $('#btn-login-back').addEventListener('click', () => {
+    codeStep.hidden = true;
+    emailEl.disabled = false;
+    $('#login-code').value = '';
+    Auth.note('');
+    emailEl.focus();
+  });
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  initLogin();
+  $('#btn-logout').addEventListener('click', () => Auth.signOut());
+
+  // 로그인이 필요하면 셋업 화면 대신 로그인 화면에서 멈춘다
+  if (await Auth.boot()) return;
+  if (Auth.cfg.required) {
+    $('#account-email').textContent = Auth.email || '로그인됨';
+    $('#account-row').hidden = false;
+  }
+
+  document.body.dataset.screen = 'setup';
   UI.initSetup();
   UI.offerResume();
 

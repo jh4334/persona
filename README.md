@@ -60,7 +60,7 @@ PYTHONPATH=src python -m classroom_sim.web --port 8000 --host 0.0.0.0
 
 수업 중 명령: 일반 텍스트(전체 발화), `@이름 질문`(지목, 자동완성 지원), `/판서`, `/활동`, `/모둠 4인`, `/모둠활동`, `/순회 이름`, `/칭찬`, `/주의`, `/시간 10분`, `/돌발`, `/상태`, `/도움말`, `/종료`(사후 리포트 + 수업 분석 생성, `reports/stage/`에 자동 저장). 도트 교실의 픽셀아트 에셋 제작 가이드는 [docs/asset_request.md](docs/asset_request.md)를 참고하세요 (에셋이 없어도 임시 스프라이트로 동작).
 
-새로고침·서버 재시작 후에도 진행 중 수업을 "이어하기"로 재개할 수 있고(세션 스냅샷), 상태 확인은 `GET /healthz`, 회귀 테스트는 `python tests/regression/run_all.py`로 실행합니다. 서버를 여러 대로 늘리거나 컨테이너를 재배포하는 환경이라면 스냅샷을 Supabase에도 함께 기록할 수 있습니다 — [docs/supabase_setup.md](docs/supabase_setup.md) 참조 (설정하지 않으면 기존대로 로컬 디스크만 사용). 출시 준비 상태·남은 리스크·체크리스트는 **[docs/release_checklist.md](docs/release_checklist.md)** 를 참고하세요.
+새로고침·서버 재시작 후에도 진행 중 수업을 "이어하기"로 재개할 수 있고(세션 스냅샷), 상태 확인은 `GET /healthz`, 회귀 테스트는 `python tests/regression/run_all.py`로 실행합니다. 공개 인터넷에 올리거나 여러 교사가 나눠 쓴다면 **로그인(Supabase Auth 이메일 인증)** 과 세션 스냅샷의 클라우드 저장을 켤 수 있습니다 — [docs/supabase_setup.md](docs/supabase_setup.md) 참조. 설정하지 않으면 기존대로 로그인 없이 로컬 디스크만 사용합니다(같은 Wi-Fi 안에서 쓰는 전제). 출시 준비 상태·남은 리스크·체크리스트는 **[docs/release_checklist.md](docs/release_checklist.md)** 를 참고하세요.
 
 ### CLI 옵션
 

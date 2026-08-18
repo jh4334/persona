@@ -125,6 +125,7 @@ class SupabaseStore(SnapshotStore):
         meta = payload.get("meta") or {}
         row = {
             "id": sid,
+            "user_id": meta.get("user_id") or None,   # 인증이 꺼져 있으면 null
             "saved_at": float(payload.get("saved_at") or time.time()),
             "class_name": (meta.get("class_name") or "")[:200] or None,
             "payload": payload,

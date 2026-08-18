@@ -10,7 +10,42 @@
 <link rel="manifest" href="/static/manifest.webmanifest">
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body data-screen="setup">
+<!-- 로그인 필요 여부를 서버에 물어 확정할 때까지는 어떤 화면도 보이지 않는다.
+     ("booting"에 대응하는 규칙이 없어 전부 display:none) -->
+<body data-screen="booting">
+
+<!-- ══════════════ 0. 로그인 화면 (서버가 인증을 요구할 때만) ══════════════ -->
+<section id="screen-login" class="screen">
+  <div class="setup-box">
+    <h1 class="pixel-title">보이는 교실</h1>
+    <p class="subtitle">수업을 시작하려면 먼저 로그인해 주세요.</p>
+
+    <form id="login-form" novalidate>
+      <label class="field">
+        <span>이메일</span>
+        <input id="login-email" type="email" autocomplete="email"
+               inputmode="email" placeholder="teacher@school.kr" required>
+      </label>
+      <button id="btn-login-send" class="btn-primary" type="submit">로그인 링크 받기</button>
+    </form>
+
+    <div id="login-code-step" hidden>
+      <label class="field">
+        <span>메일로 받은 6자리 코드</span>
+        <input id="login-code" type="text" inputmode="numeric" autocomplete="one-time-code"
+               pattern="[0-9]*" maxlength="8" placeholder="000000">
+      </label>
+      <button id="btn-login-verify" class="btn-primary" type="button">코드로 로그인</button>
+      <button id="btn-login-back" class="link-btn" type="button">다른 메일 주소로 다시 시도</button>
+    </div>
+
+    <p id="login-note" class="login-note" hidden></p>
+    <p class="disclaimer">
+      메일에 담긴 링크를 눌러도 로그인됩니다. 링크가 열리지 않는 환경(사내망·IP 주소 접속)에서는
+      같은 메일의 6자리 코드를 입력하세요.
+    </p>
+  </div>
+</section>
 
 <!-- ══════════════ 1. 셋업 화면 ══════════════ -->
 <section id="screen-setup" class="screen">
@@ -48,6 +83,11 @@
 
     <p id="setup-error" class="error" hidden></p>
     <p class="notice">※ 시뮬레이션 결과이며 실제 학생의 예측·평가·선발에 사용할 수 없습니다.</p>
+
+    <div id="account-row" class="account-row" hidden>
+      <span id="account-email"></span>
+      <button id="btn-logout" class="link-btn" type="button">로그아웃</button>
+    </div>
   </div>
 </section>
 

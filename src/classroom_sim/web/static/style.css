@@ -47,6 +47,7 @@ html, body {
 
 /* 화면 전환 ------------------------------------------------- */
 .screen { display: none; height: 100%; }
+body[data-screen="login"]  #screen-login  { display: flex; }
 body[data-screen="setup"]  #screen-setup  { display: flex; }
 body[data-screen="stage"]  #screen-stage  { display: grid; }
 body[data-screen="report"] #screen-report { display: block; }
@@ -56,6 +57,53 @@ body[data-screen="report"] #screen-report { display: block; }
   border: 2px solid var(--line);
   box-shadow: 0 3px 0 0 var(--line), inset 0 0 0 1px rgba(255, 255, 255, .05);
 }
+
+/* ============================= 0. 로그인 ============================= */
+#screen-login {
+  align-items: center;
+  justify-content: center;
+  background:
+    repeating-linear-gradient(0deg,  rgba(255,255,255,.018) 0 1px, transparent 1px 16px),
+    repeating-linear-gradient(90deg, rgba(255,255,255,.018) 0 1px, transparent 1px 16px),
+    radial-gradient(ellipse at 50% 0%, #23283b 0%, var(--bg) 70%);
+}
+
+#screen-login .btn-primary { width: 100%; margin-top: 4px; }
+#login-code-step { margin-top: 18px; border-top: 2px solid var(--line); padding-top: 16px; }
+
+.login-note {
+  margin: 14px 0 0;
+  padding: 9px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--panel-2);
+  border-left: 3px solid var(--accent);
+}
+.login-note.bad { border-left-color: #d76a6a; }
+
+.link-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  background: none;
+  border: none;
+  box-shadow: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-decoration: underline;
+  padding: 6px 0;
+}
+.link-btn:hover { background: none; color: var(--text); }
+
+/* 셋업 화면 하단의 계정 표시 — 눈에 띄지 않되 찾을 수 있게 */
+.account-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-top: 14px; padding-top: 12px; border-top: 2px solid var(--line);
+  font-size: 11px; color: var(--text-dim);
+}
+.account-row #account-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-row .link-btn { width: auto; margin: 0; }
 
 /* ============================= 1. 셋업 ============================= */
 #screen-setup {
@@ -88,7 +136,7 @@ body[data-screen="report"] #screen-report { display: block; }
 .field { display: block; margin-bottom: 14px; }
 .field > span { display: block; margin-bottom: 5px; font-size: 12px; color: var(--text-dim); letter-spacing: 1px; }
 
-select, input[type="text"] {
+select, input[type="text"], input[type="email"] {
   width: 100%;
   padding: 9px 10px;
   background: var(--panel-2);
@@ -99,7 +147,7 @@ select, input[type="text"] {
   font-size: 13px;
   outline: none;
 }
-select:focus, input[type="text"]:focus { border-color: var(--accent); }
+select:focus, input[type="text"]:focus, input[type="email"]:focus { border-color: var(--accent); }
 
 button {
   font-family: inherit;
@@ -340,8 +388,8 @@ button.danger { color: var(--danger); }
        (max-width: 950px) and (max-height: 500px) and (orientation: landscape) {
 
   /* 공통: 터치 타깃 · 더블탭 확대 방지 · iOS 입력 확대 방지(16px 이상) */
-  button, select, input[type="text"], canvas { touch-action: manipulation; }
-  select, input[type="text"] { font-size: 16px; padding: 11px 10px; }
+  button, select, input[type="text"], input[type="email"], canvas { touch-action: manipulation; }
+  select, input[type="text"], input[type="email"] { font-size: 16px; padding: 11px 10px; }
 
   /* --- 1. 셋업 --- */
   #screen-setup { align-items: flex-start; padding: 16px 12px 28px; overflow-y: auto; }
@@ -541,7 +589,7 @@ button.danger { color: var(--danger); }
 /* ── 인쇄: 리포트 본문만, 흰 종이에 검은 글씨로 ── */
 @media print {
   body { background: #fff !important; color: #000 !important; }
-  #screen-setup, #screen-stage, .report-actions, .saved-note { display: none !important; }
+  #screen-login, #screen-setup, #screen-stage, .report-actions, .saved-note { display: none !important; }
   #screen-report { display: block !important; position: static !important; padding: 0 !important; }
   .report-box { max-width: none; margin: 0; padding: 0; }
   .md {

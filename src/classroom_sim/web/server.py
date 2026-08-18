@@ -36,6 +36,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..personas import Classroom, load_classroom
+from . import auth as _auth
 from .store import make_store, supabase_config
 
 # ---------------------------------------------------------------------------
@@ -119,6 +120,11 @@ class SessionRecord:
         self.lock = threading.Lock()      # 턴 처리 직렬화 (동시 요청 경쟁 방지)
         self.last_used = time.time()
 
+    @property
+    def user_id(self) -> str | None:
+        """이 수업의 주인. 인증을 끄고 쓰면 None."""
+        return self.meta.get("user_id")
+
     def touch(self) -> None:
         self.last_used = time.time()
 
@@ -200,9 +206,49 @@ def _evict_stale() -> None:
             log.info("session evicted (cap %d): %s", MAX_SESSIONS, oldest[:8])
 
 
-def _get(session_id: str) -> SessionRecord:
+# ---------------------------------------------------------------------------
+# 인증 (Supabase Auth)
+# ---------------------------------------------------------------------------
+
+AUTH = _auth.load_config()
+VERIFIER = _auth.Verifier(AUTH)
+if AUTH.required:
+    log.info("인증 활성 — 로그인한 사용자만 수업을 만들 수 있습니다 (%s)", AUTH.url)
+
+
+def _current_user(request: Request) -> _auth.User | None:
+    """요청의 Bearer 토큰에서 사용자를 확인한다.
+
+    인증이 꺼져 있으면(LAN 전용 운영) None을 돌려주고 통과시킨다. 이때도 토큰이
+    실려 오면 확인은 해 본다 — 켜고 끄는 과도기에 소유권 기록이 끊기지 않게.
+    """
+    token = _auth.bearer_token(request.headers.get("Authorization"))
+    if not AUTH.required:
+        if token and AUTH.can_verify:
+            try:
+                return VERIFIER.verify(token)
+            except _auth.AuthError:
+                return None
+        return None
+    try:
+        return VERIFIER.verify(token)
+    except _auth.AuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc),
+                            headers={"WWW-Authenticate": "Bearer"}) from exc
+
+
+def _get(session_id: str, user: _auth.User | None = None) -> SessionRecord:
     rec = SESSIONS.get(session_id)
     if rec is None:
+        raise HTTPException(
+            status_code=404,
+            detail="세션을 찾을 수 없습니다. 오래 자리를 비웠다면 세션이 회수되었을 수 있습니다 — 새 수업을 시작해 주세요.",
+        )
+    # 남의 수업에는 손대지 못한다. 존재 여부까지 숨기려고 403이 아닌 404로 답한다.
+    owner = rec.user_id
+    if AUTH.required and owner != (user.id if user else None):
+        log.warning("session access denied: %s owner=%s requester=%s",
+                    session_id[:8], (owner or "-")[:8], (user.id if user else "-")[:8])
         raise HTTPException(
             status_code=404,
             detail="세션을 찾을 수 없습니다. 오래 자리를 비웠다면 세션이 회수되었을 수 있습니다 — 새 수업을 시작해 주세요.",
@@ -314,8 +360,9 @@ def index() -> FileResponse:
 
 
 @app.get("/api/classrooms")
-def list_classrooms() -> list[dict]:
+def list_classrooms(request: Request) -> list[dict]:
     """personas/*.json 스캔 → [{path, class_name, grade, count}]"""
+    _current_user(request)      # 로그인 강제 시 학급 목록도 열람 불가
     out: list[dict] = []
     for p in sorted((ROOT / "personas").glob("*.json")):
         try:
@@ -334,8 +381,9 @@ def list_classrooms() -> list[dict]:
 
 
 @app.get("/api/lessons")
-def list_lessons() -> list[dict]:
+def list_lessons(request: Request) -> list[dict]:
     """lessons/*.md 스캔 → [{path, title}]"""
+    _current_user(request)
     out: list[dict] = []
     for p in sorted((ROOT / "lessons").glob("*.md")):
         title = p.stem
@@ -348,6 +396,26 @@ def list_lessons() -> list[dict]:
             pass
         out.append({"path": str(p.relative_to(ROOT)), "title": title})
     return out
+
+
+@app.get("/api/auth/config")
+def auth_config() -> dict:
+    """로그인 화면이 필요로 하는 값. anon 키는 공개용이라 내려보내도 안전하다."""
+    return {
+        "required": AUTH.required,
+        "url": AUTH.url if AUTH.required else "",
+        "anon_key": AUTH.anon_key if AUTH.required else "",
+    }
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request) -> dict:
+    """토큰이 아직 유효한지 확인 (로그인 화면을 건너뛸지 판단)."""
+    user = _current_user(request)
+    if user is None:
+        return {"authenticated": False, "required": AUTH.required}
+    return {"authenticated": True, "required": AUTH.required,
+            "user_id": user.id, "email": user.email}
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -369,12 +437,14 @@ def healthz() -> dict:
         "sessions": len(SESSIONS),
         "max_sessions": MAX_SESSIONS,
         "store": STORE.name,          # disk / disk+supabase — 배포 후 설정이 먹었는지 확인용
+        "auth": "required" if AUTH.required else "open",
     }
 
 
 @app.post("/api/sessions")
 def create_session(req: CreateSessionReq, request: Request) -> dict:
-    _check_create_rate(request.client.host if request.client else "unknown")
+    user = _current_user(request)
+    _check_create_rate(user.id if user else (request.client.host if request.client else "unknown"))
     if req.backend not in ALLOWED_BACKENDS:
         raise HTTPException(status_code=400,
                             detail=f"지원하지 않는 백엔드입니다: {req.backend!r} (가능: {', '.join(ALLOWED_BACKENDS)})")
@@ -403,6 +473,7 @@ def create_session(req: CreateSessionReq, request: Request) -> dict:
             "lesson_path": str(lpath.relative_to(ROOT)),
             "backend": backend_used,
             "class_name": classroom.class_name,
+            "user_id": user.id if user else None,
         },
     )
     log.info("session created: %s class=%s students=%d backend=%s lesson=%s",
@@ -452,8 +523,8 @@ def _save_report(rec: "SessionRecord", session_id: str, report: str) -> str | No
 
 
 @app.post("/api/sessions/{session_id}/turn")
-def take_turn(session_id: str, req: TurnReq) -> dict:
-    rec = _get(session_id)
+def take_turn(session_id: str, req: TurnReq, request: Request) -> dict:
+    rec = _get(session_id, _current_user(request))
     text = (req.input or "").strip()
     if len(text) > MAX_INPUT_CHARS:
         raise HTTPException(status_code=400,
@@ -496,8 +567,8 @@ def take_turn(session_id: str, req: TurnReq) -> dict:
 
 
 @app.get("/api/sessions/{session_id}/state")
-def get_state(session_id: str) -> dict:
-    rec = _get(session_id)
+def get_state(session_id: str, request: Request) -> dict:
+    rec = _get(session_id, _current_user(request))
     snap = _serialize(rec.session.state_snapshot())
     # 새로고침 복구용 부가 정보 (계약 필드는 유지한 채 덧붙임)
     snap["personas"] = _persona_cards(rec.classroom)
@@ -508,14 +579,14 @@ def get_state(session_id: str) -> dict:
 
 
 @app.get("/api/sessions/{session_id}/transcript")
-def get_transcript(session_id: str) -> list[dict]:
-    rec = _get(session_id)
+def get_transcript(session_id: str, request: Request) -> list[dict]:
+    rec = _get(session_id, _current_user(request))
     return _serialize(rec.session.transcript_json())
 
 
 @app.post("/api/sessions/{session_id}/end")
-def end_session(session_id: str) -> dict:
-    rec = _get(session_id)
+def end_session(session_id: str, request: Request) -> dict:
+    rec = _get(session_id, _current_user(request))
     if not rec.lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="이전 입력이 아직 처리 중입니다. 잠시 후 다시 시도해 주세요.")
     try:
