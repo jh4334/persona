@@ -411,7 +411,7 @@ def _persona_cards(classroom: Classroom) -> list[dict]:
 # 앱
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="보이는 교실 — classroom_sim web", version="0.5")
+app = FastAPI(title="보이는 교실 — classroom_sim web", version="0.6")
 
 
 ALLOWED_BACKENDS = ("mock", "codex", "anthropic")
