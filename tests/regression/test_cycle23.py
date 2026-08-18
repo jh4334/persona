@@ -317,6 +317,8 @@ try:
 
         page.click("#btn-cls-add")
         page.wait_for_selector("#cls-editor:not([hidden])")
+        page.click("#tab-json")                 # 이 스위트는 JSON 붙여넣기 경로를 본다
+        page.wait_for_selector("#cls-pane-json:not([hidden])")
 
         # 형식이 틀리면 어디가 문제인지 알려 준다
         page.fill("#cls-json", '{"students":[{"id":"S1"}]}')

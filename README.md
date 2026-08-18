@@ -74,7 +74,7 @@ PYTHONPATH=src python -m classroom_sim.web --port 8000 --host 0.0.0.0
 
 ## 나만의 학급 만들기
 
-웹판에서는 셋업 화면의 **[+ 내 학급 만들기]** 로 학급 JSON을 붙여넣거나 파일을 올려 바로 만들 수 있습니다(만든 사람에게만 보입니다). 파일로 관리하려면 `personas/class_6_3.json`을 복사해 수정하세요. MatrAIx의 4영역 속성 체계(배경/심리/능력/행동)를 교실용으로 재설계한 **9개 그룹 · 102개 속성 카탈로그**(`personas/schema/dimensions.json`)에서 필요한 속성을 골라 학생별로 채웁니다. 전체 속성 목록은 [docs/dimension_reference.md](docs/dimension_reference.md), 작성 원칙은 [docs/persona_schema.md](docs/persona_schema.md)를 참고하세요. 기본 필드:
+웹판에서는 셋업 화면의 **[+ 내 학급 만들기]** 로 JSON 없이 폼으로 학급을 만들 수 있습니다 — 성취 수준별 인원을 한 번에 만들고, 학생을 복제하고, 102개 속성 중 필요한 것만 골라 채웁니다(전부 선택 사항). 이미 학급 파일이 있다면 JSON 탭에 붙여넣어도 됩니다. 만든 학급은 만든 사람에게만 보입니다. 파일로 관리하려면 `personas/class_6_3.json`을 복사해 수정하세요. MatrAIx의 4영역 속성 체계(배경/심리/능력/행동)를 교실용으로 재설계한 **9개 그룹 · 102개 속성 카탈로그**(`personas/schema/dimensions.json`)에서 필요한 속성을 골라 학생별로 채웁니다. 전체 속성 목록은 [docs/dimension_reference.md](docs/dimension_reference.md), 작성 원칙은 [docs/persona_schema.md](docs/persona_schema.md)를 참고하세요. 기본 필드:
 
 ```jsonc
 {

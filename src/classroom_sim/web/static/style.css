@@ -209,6 +209,75 @@ button.danger { color: var(--danger); }
 #cls-json:focus { border-color: var(--accent); }
 #cls-error { white-space: pre-wrap; }
 
+/* --- 학급 만들기 폼 --- */
+.cls-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.cls-tabs button { flex: 1; font-size: 11px; box-shadow: none; border-bottom-width: 3px; }
+.cls-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--accent); color: var(--accent); background: var(--panel);
+}
+
+.bd-row { display: flex; gap: 8px; }
+.bd-row .bd-field { flex: 1; min-width: 0; }
+.bd-narrow { flex: 0 0 34% !important; }
+.bd-field { display: block; margin-bottom: 8px; }
+.bd-field > span { display: block; margin-bottom: 3px; font-size: 10px; color: var(--text-dim); }
+.bd-field input, .bd-field select { font-size: 12px; padding: 6px 8px; }
+
+.bd-quick {
+  display: flex; align-items: center; gap: 8px;
+  margin: 12px 0 8px; padding-top: 10px; border-top: 2px solid var(--line);
+  font-size: 11px; color: var(--text-dim);
+}
+.bd-quick > span { flex: 1; }
+.bd-quick b { color: var(--text); }
+.bd-quick button { font-size: 10px; }
+
+.bd-quick-panel { margin-bottom: 10px; padding: 10px; background: var(--panel); border: 2px solid var(--line); }
+.bd-quick-grid { display: flex; gap: 6px; }
+.bd-quick-grid label { flex: 1; text-align: center; font-size: 10px; color: var(--text-dim); }
+.bd-quick-grid input { width: 100%; margin-top: 3px; padding: 5px; text-align: center;
+  background: var(--panel-2); color: var(--text); border: 2px solid var(--line); font-family: inherit; }
+
+#bd-students { max-height: 46vh; overflow-y: auto; }
+
+.bd-card { margin-bottom: 5px; border: 2px solid var(--line); background: var(--panel); }
+.bd-card.open { border-color: var(--line-soft); }
+.bd-head {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 7px 8px; text-align: left; background: none; border: none; box-shadow: none;
+  font-size: 12px;
+}
+.bd-head:hover { background: var(--panel-2); }
+.bd-num {
+  flex: 0 0 auto; min-width: 18px; padding: 1px 4px; text-align: center;
+  font-family: var(--mono); font-size: 10px; color: var(--text-dim);
+  background: var(--panel-2); border: 1px solid var(--line);
+}
+.bd-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bd-name i { color: var(--text-dim); }
+.bd-lv { font-size: 10px; color: var(--accent); }
+.bd-attrs { font-size: 9px; color: var(--text-dim); border: 1px solid var(--line-soft); padding: 1px 4px; }
+.bd-caret { color: var(--text-dim); font-size: 10px; }
+
+.bd-body { padding: 4px 9px 9px; border-top: 2px solid var(--line); }
+.bd-card-actions { display: flex; gap: 6px; margin-top: 8px; }
+.bd-card-actions button { flex: 1; font-size: 10px; }
+
+.bd-groups { margin-top: 10px; }
+.bd-group { margin-bottom: 3px; border: 1px solid var(--line); background: var(--panel-2); }
+.bd-group > summary {
+  padding: 5px 8px; cursor: pointer; font-size: 11px; list-style: none;
+}
+.bd-group > summary::-webkit-details-marker { display: none; }
+.bd-group > summary::before { content: '▸ '; color: var(--text-dim); }
+.bd-group[open] > summary::before { content: '▾ '; }
+.bd-group > summary b { color: var(--accent); font-size: 10px; }
+.bd-group > summary i { display: block; margin-top: 2px; font-size: 9px; color: var(--text-dim); font-style: normal; }
+.bd-group-body { padding: 4px 8px 8px; }
+.bd-attr { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.bd-attr > span { flex: 0 0 40%; font-size: 10px; color: var(--text-dim); }
+.bd-attr select, .bd-attr input { flex: 1; min-width: 0; font-size: 11px; padding: 4px 6px; }
+
 optgroup { color: var(--text-dim); font-size: 11px; }
 optgroup option { color: var(--text); font-size: 13px; }
 
@@ -426,6 +495,8 @@ optgroup option { color: var(--text); font-size: 13px; }
   /* 공통: 터치 타깃 · 더블탭 확대 방지 · iOS 입력 확대 방지(16px 이상) */
   button, select, input[type="text"], input[type="email"], canvas { touch-action: manipulation; }
   select, input[type="text"], input[type="email"] { font-size: 16px; padding: 11px 10px; }
+  .bd-field input, .bd-field select, .bd-attr select, .bd-attr input { font-size: 16px; }
+  #bd-students { max-height: 40vh; }
   #cls-json { font-size: 16px; }
 
   /* --- 1. 셋업 --- */

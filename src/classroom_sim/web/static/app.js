@@ -309,6 +309,7 @@ const Auth = {
 const Api = {
   classrooms: () => api('/api/classrooms'),
   lessons: () => api('/api/lessons'),
+  dimensions: () => api('/api/dimensions'),
   createClassroom: (jsonText) => api('/api/classrooms',
     { method: 'POST', body: JSON.stringify({ json_text: jsonText }) }),
   deleteClassroom: (id) => api('/api/classrooms/' + encodeURIComponent(id), { method: 'DELETE' }),
@@ -954,14 +955,42 @@ const UI = {
     $('#cls-editor').hidden = !on;
     $('#btn-cls-add').hidden = on;
     UI.clsError('');
-    if (on) $('#cls-json').focus();
-    else { $('#cls-json').value = ''; $('#cls-file').value = ''; }
+    if (on) { Builder.open(); $('#bd-class-name').focus(); }
+    else {
+      $('#cls-json').value = ''; $('#cls-file').value = '';
+      $('#bd-quick-panel').hidden = true;
+      Builder.reset();
+    }
+  },
+
+  /** 폼 ↔ JSON 탭 전환 */
+  clsTab(which) {
+    const form = which === 'form';
+    $('#cls-pane-form').hidden = !form;
+    $('#cls-pane-json').hidden = form;
+    $('#tab-form').setAttribute('aria-selected', form ? 'true' : 'false');
+    $('#tab-json').setAttribute('aria-selected', form ? 'false' : 'true');
+    UI.clsError('');
+  },
+
+  /** 지금 열려 있는 탭에 맞춰 저장할 JSON 문자열을 만든다 */
+  classroomText() {
+    if ($('#cls-pane-json').hidden === false) return ($('#cls-json').value || '').trim();
+    const bad = Builder.precheck();     // 폼에서 바로 잡을 수 있는 것은 서버 가기 전에
+    if (bad) throw new Error(bad);
+    return JSON.stringify(Builder.toJSON(), null, 2);
   },
 
   async saveClassroom() {
-    const text = ($('#cls-json').value || '').trim();
-    if (!text) { UI.clsError('학급 JSON을 붙여넣거나 파일을 골라 주세요.'); return; }
     const btn = $('#btn-cls-save');
+    let text;
+    try {
+      text = UI.classroomText();
+    } catch (e) {
+      UI.clsError(e.message);
+      return;
+    }
+    if (!text) { UI.clsError('학급 JSON을 붙여넣거나 파일을 골라 주세요.'); return; }
     btn.disabled = true;
     UI.clsError('');
     try {
@@ -1852,10 +1881,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#btn-cls-cancel').addEventListener('click', () => UI.toggleClassroomEditor(false));
   $('#btn-cls-save').addEventListener('click', UI.saveClassroom);
   $('#btn-cls-del').addEventListener('click', UI.deleteClassroom);
+  $('#tab-form').addEventListener('click', () => UI.clsTab('form'));
+  $('#tab-json').addEventListener('click', () => UI.clsTab('json'));
+  $('#btn-bd-add').addEventListener('click', () => { Builder.addStudent(); Builder.render(); });
+  $('#btn-bd-quick').addEventListener('click', () => {
+    $('#bd-quick-panel').hidden = !$('#bd-quick-panel').hidden;
+  });
+  $('#btn-bd-quick-cancel').addEventListener('click', () => { $('#bd-quick-panel').hidden = true; });
+  $('#btn-bd-quick-go').addEventListener('click', () => {
+    const dist = {};
+    let total = 0;
+    ['상', '중상', '중', '중하', '하'].forEach((lv) => {
+      const n = Math.max(0, Math.min(40, Number($('#q-' + lv).value) || 0));
+      dist[lv] = n; total += n;
+    });
+    if (!total) { UI.clsError('인원을 1명 이상 넣어 주세요.'); return; }
+    if (total > 40) { UI.clsError('최대 40명까지 만들 수 있습니다.'); return; }
+    Builder.quickFill(total, dist);
+    Builder.render();
+    $('#bd-quick-panel').hidden = true;
+    UI.clsError('');
+  });
   $('#cls-file').addEventListener('change', async (e) => {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
-    try { $('#cls-json').value = await f.text(); UI.clsError(''); }
+    try { $('#cls-json').value = await f.text(); UI.clsTab('json'); UI.clsError(''); }
     catch (err) { UI.clsError('파일을 읽지 못했습니다: ' + err.message); }
   });
 

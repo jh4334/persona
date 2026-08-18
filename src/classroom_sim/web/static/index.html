@@ -63,15 +63,59 @@
     </div>
 
     <div id="cls-editor" class="cls-editor" hidden>
-      <p class="cls-help">
-        학급 JSON을 붙여넣거나 파일을 고르세요.
-        형식은 <code>personas/class_6_3.json</code>과 같습니다 —
-        <code>class_name</code>, <code>grade</code>, 그리고 학생마다
-        <code>id</code>·<code>name</code>이 필요합니다.
-      </p>
-      <input id="cls-file" type="file" accept=".json,application/json">
-      <textarea id="cls-json" rows="8" spellcheck="false"
-                placeholder='{&#10;  "class_name": "행복초 5학년 2반",&#10;  "grade": "초등학교 5학년",&#10;  "students": [&#10;    { "id": "S01", "name": "김하늘", "achievement_level": "상" }&#10;  ]&#10;}'></textarea>
+      <div class="cls-tabs" role="tablist">
+        <button id="tab-form" type="button" role="tab" aria-selected="true">폼으로 만들기</button>
+        <button id="tab-json" type="button" role="tab" aria-selected="false">JSON 붙여넣기</button>
+      </div>
+
+      <!-- 폼 -->
+      <div id="cls-pane-form" class="cls-pane">
+        <div class="bd-row">
+          <label class="bd-field"><span>학급 이름 *</span>
+            <input id="bd-class-name" type="text" placeholder="행복초 5학년 2반"></label>
+          <label class="bd-field bd-narrow"><span>학년</span>
+            <input id="bd-grade" type="text" placeholder="초등학교 5학년"></label>
+        </div>
+        <label class="bd-field"><span>학급 설명 (선택)</span>
+          <input id="bd-desc" type="text" placeholder="활동을 좋아하지만 집중 시간이 짧은 편"></label>
+
+        <div class="bd-quick">
+          <span>학생 <b id="bd-count">0명</b></span>
+          <button id="btn-bd-add" type="button">+ 학생 추가</button>
+          <button id="btn-bd-quick" type="button">인원 한 번에 만들기</button>
+        </div>
+
+        <div id="bd-quick-panel" class="bd-quick-panel" hidden>
+          <p class="cls-help">성취 수준별 인원을 넣으면 그만큼 학생 초안을 만듭니다. 이름과 세부 내용은 뒤에 고치면 됩니다.</p>
+          <div class="bd-quick-grid">
+            <label><span>상</span><input id="q-상" type="number" min="0" max="40" value="2"></label>
+            <label><span>중상</span><input id="q-중상" type="number" min="0" max="40" value="3"></label>
+            <label><span>중</span><input id="q-중" type="number" min="0" max="40" value="4"></label>
+            <label><span>중하</span><input id="q-중하" type="number" min="0" max="40" value="2"></label>
+            <label><span>하</span><input id="q-하" type="number" min="0" max="40" value="1"></label>
+          </div>
+          <div class="cls-actions">
+            <button id="btn-bd-quick-go" class="btn-primary" type="button">만들기</button>
+            <button id="btn-bd-quick-cancel" type="button">취소</button>
+          </div>
+          <p class="cls-help">※ 지금 편집 중인 학생 목록을 대체합니다.</p>
+        </div>
+
+        <div id="bd-students"></div>
+      </div>
+
+      <!-- JSON -->
+      <div id="cls-pane-json" class="cls-pane" hidden>
+        <p class="cls-help">
+          이미 학급 JSON 파일이 있다면 그대로 쓰세요.
+          형식은 <code>personas/class_6_3.json</code>과 같습니다 —
+          <code>class_name</code>, 그리고 학생마다 <code>id</code>·<code>name</code>이 필요합니다.
+        </p>
+        <input id="cls-file" type="file" accept=".json,application/json">
+        <textarea id="cls-json" rows="8" spellcheck="false"
+                  placeholder='{&#10;  "class_name": "행복초 5학년 2반",&#10;  "grade": "초등학교 5학년",&#10;  "students": [&#10;    { "id": "S01", "name": "김하늘", "achievement_level": "상" }&#10;  ]&#10;}'></textarea>
+      </div>
+
       <div class="cls-actions">
         <button id="btn-cls-save" class="btn-primary" type="button">저장</button>
         <button id="btn-cls-cancel" type="button">취소</button>
@@ -243,6 +287,7 @@
   </div>
 </section>
 
+<script src="/static/builder.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

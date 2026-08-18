@@ -426,6 +426,23 @@ def delete_classroom(classroom_id: str, request: Request) -> dict:
     return {"deleted": classroom_id}
 
 
+@app.get("/api/dimensions")
+def list_dimensions(request: Request) -> dict:
+    """학급 만들기 폼이 쓰는 속성 카탈로그 (personas/schema/dimensions.json).
+
+    9그룹 102속성. 폼은 values가 있으면 선택지로, 없으면 자유 입력으로 그린다.
+    """
+    _current_user(request)
+    f = ROOT / "personas" / "schema" / "dimensions.json"
+    if not f.is_file():
+        return {"version": "", "groups": []}
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        log.exception("dimensions.json 을 읽지 못했습니다")
+        return {"version": "", "groups": []}
+
+
 @app.get("/api/lessons")
 def list_lessons(request: Request) -> list[dict]:
     """lessons/*.md 스캔 → [{path, title}]"""
