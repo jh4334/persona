@@ -102,6 +102,7 @@ const App = {
   busy: false,
   reportMd: '',
   seatOf: {},             // id → 좌석 index
+  classrooms: [],         // 셋업 화면의 학급 목록 (내 학급 여부 판단용)
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -308,6 +309,9 @@ const Auth = {
 const Api = {
   classrooms: () => api('/api/classrooms'),
   lessons: () => api('/api/lessons'),
+  createClassroom: (jsonText) => api('/api/classrooms',
+    { method: 'POST', body: JSON.stringify({ json_text: jsonText }) }),
+  deleteClassroom: (id) => api('/api/classrooms/' + encodeURIComponent(id), { method: 'DELETE' }),
   createSession: (body) => api('/api/sessions', { method: 'POST', body: JSON.stringify(body) }),
   turn: (id, input) => api(`/api/sessions/${id}/turn`, { method: 'POST', body: JSON.stringify({ input }) }),
   state: (id) => api(`/api/sessions/${id}/state`),
@@ -907,18 +911,85 @@ const UI = {
   async initSetup() {
     try {
       const [classrooms, lessons] = await Promise.all([Api.classrooms(), Api.lessons()]);
-      const c = $('#sel-classroom'), l = $('#sel-lesson');
-      c.innerHTML = classrooms.map((x) =>
-        `<option value="${esc(x.path)}">${esc(x.class_name)} — ${esc(x.grade)} (${x.count}명)</option>`).join('');
-      l.innerHTML = lessons.map((x) =>
+      UI.fillClassrooms(classrooms);
+      $('#sel-lesson').innerHTML = lessons.map((x) =>
         `<option value="${esc(x.path)}">${esc(x.title)}</option>`).join('');
-      if (!classrooms.length) UI.setupError('personas/ 에 학급 JSON이 없습니다.');
       if (!lessons.length) UI.setupError('lessons/ 에 수업안 마크다운이 없습니다.');
     } catch (e) {
       UI.setupError('목록을 불러오지 못했습니다: ' + e.message);
     }
     $('#sel-backend').addEventListener('change', UI.updateBackendNote);
     UI.updateBackendNote();
+  },
+
+  /** 내 학급은 위 묶음, 샘플은 아래 묶음으로 나눠 보여 준다 */
+  fillClassrooms(list) {
+    const opt = (x) =>
+      `<option value="${esc(x.id)}">${esc(x.class_name)}${x.grade ? ' — ' + esc(x.grade) : ''} (${x.count}명)</option>`;
+    const mine = list.filter((x) => x.mine), samples = list.filter((x) => !x.mine);
+    let html = '';
+    if (mine.length) html += `<optgroup label="내 학급">${mine.map(opt).join('')}</optgroup>`;
+    if (samples.length) html += `<optgroup label="샘플 학급">${samples.map(opt).join('')}</optgroup>`;
+    const sel = $('#sel-classroom');
+    sel.innerHTML = html;
+    App.classrooms = list;
+    if (!list.length) UI.setupError('학급이 없습니다. [+ 내 학급 만들기]로 추가해 주세요.');
+    UI.syncClassroomActions();
+  },
+
+  /** 샘플은 지울 수 없으므로 선택에 따라 삭제 버튼을 감춘다 */
+  syncClassroomActions() {
+    const id = $('#sel-classroom').value;
+    const cur = (App.classrooms || []).find((x) => x.id === id);
+    $('#btn-cls-del').hidden = !(cur && cur.mine);
+  },
+
+  clsError(msg) {
+    const el = $('#cls-error');
+    el.textContent = msg || '';
+    el.hidden = !msg;
+  },
+
+  toggleClassroomEditor(on) {
+    $('#cls-editor').hidden = !on;
+    $('#btn-cls-add').hidden = on;
+    UI.clsError('');
+    if (on) $('#cls-json').focus();
+    else { $('#cls-json').value = ''; $('#cls-file').value = ''; }
+  },
+
+  async saveClassroom() {
+    const text = ($('#cls-json').value || '').trim();
+    if (!text) { UI.clsError('학급 JSON을 붙여넣거나 파일을 골라 주세요.'); return; }
+    const btn = $('#btn-cls-save');
+    btn.disabled = true;
+    UI.clsError('');
+    try {
+      const made = await Api.createClassroom(text);
+      const list = await Api.classrooms();
+      UI.fillClassrooms(list);
+      $('#sel-classroom').value = made.id;      // 방금 만든 학급을 바로 선택
+      UI.syncClassroomActions();
+      UI.toggleClassroomEditor(false);
+      UI.setupError('');
+    } catch (e) {
+      UI.clsError(e.message);                   // 서버가 한국어로 짚어 준 형식 오류
+    } finally {
+      btn.disabled = false;
+    }
+  },
+
+  async deleteClassroom() {
+    const id = $('#sel-classroom').value;
+    const cur = (App.classrooms || []).find((x) => x.id === id);
+    if (!cur || !cur.mine) return;
+    if (!confirm(`'${cur.class_name}' 학급을 지울까요? 되돌릴 수 없습니다.`)) return;
+    try {
+      await Api.deleteClassroom(id);
+      UI.fillClassrooms(await Api.classrooms());
+    } catch (e) {
+      UI.setupError('학급을 지우지 못했습니다: ' + e.message);
+    }
   },
 
   /** 선택한 백엔드가 무엇을 뜻하는지 셋업 화면에서 바로 설명한다 */
@@ -1023,7 +1094,7 @@ const UI = {
     btn.disabled = true; btn.textContent = '교실을 준비하는 중...';
     try {
       const data = await Api.createSession({
-        classroom_path: $('#sel-classroom').value,
+        classroom_id: $('#sel-classroom').value,
         lesson_path: $('#sel-lesson').value,
         backend: $('#sel-backend').value,
       });
@@ -1776,6 +1847,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (document.body.dataset.screen === 'stage') UI.addSystemLine('✅ 연결이 복구되었습니다.');
   });
   $('#btn-start').addEventListener('click', UI.start);
+  $('#sel-classroom').addEventListener('change', UI.syncClassroomActions);
+  $('#btn-cls-add').addEventListener('click', () => UI.toggleClassroomEditor(true));
+  $('#btn-cls-cancel').addEventListener('click', () => UI.toggleClassroomEditor(false));
+  $('#btn-cls-save').addEventListener('click', UI.saveClassroom);
+  $('#btn-cls-del').addEventListener('click', UI.deleteClassroom);
+  $('#cls-file').addEventListener('change', async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    try { $('#cls-json').value = await f.text(); UI.clsError(''); }
+    catch (err) { UI.clsError('파일을 읽지 못했습니다: ' + err.message); }
+  });
 
   $('#btn-send').addEventListener('click', () => UI.send());
   $('#teacher-input').addEventListener('input', () => Autocomplete.update());

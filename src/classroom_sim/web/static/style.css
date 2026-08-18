@@ -176,6 +176,42 @@ button.danger { color: var(--danger); }
 
 #btn-start { width: 100%; margin-top: 10px; padding: 12px; font-size: 15px; }
 
+/* --- 내 학급 만들기 --- */
+.cls-actions { display: flex; gap: 8px; margin: -6px 0 14px; }
+.cls-actions button { flex: 1; font-size: 11px; }
+
+.cls-editor {
+  margin: -4px 0 16px;
+  padding: 12px;
+  background: var(--panel-2);
+  border: 2px solid var(--line);
+}
+.cls-editor .cls-actions { margin: 10px 0 0; }
+.cls-help { margin: 0 0 10px; font-size: 11px; line-height: 1.7; color: var(--text-dim); }
+.cls-help code {
+  font-family: var(--mono); font-size: 10px;
+  background: var(--panel); padding: 1px 4px; border: 1px solid var(--line);
+}
+#cls-file { width: 100%; margin-bottom: 8px; font-size: 11px; color: var(--text-dim); }
+#cls-json {
+  width: 100%;
+  padding: 8px;
+  background: var(--panel);
+  color: var(--text);
+  border: 2px solid var(--line);
+  border-radius: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+}
+#cls-json:focus { border-color: var(--accent); }
+#cls-error { white-space: pre-wrap; }
+
+optgroup { color: var(--text-dim); font-size: 11px; }
+optgroup option { color: var(--text); font-size: 13px; }
+
 .error  { color: var(--danger); font-size: 12px; margin: 10px 0 0; white-space: pre-wrap; }
 .notice { color: var(--text-dim); font-size: 11px; margin: 18px 0 0; line-height: 1.6; }
 
@@ -390,6 +426,7 @@ button.danger { color: var(--danger); }
   /* 공통: 터치 타깃 · 더블탭 확대 방지 · iOS 입력 확대 방지(16px 이상) */
   button, select, input[type="text"], input[type="email"], canvas { touch-action: manipulation; }
   select, input[type="text"], input[type="email"] { font-size: 16px; padding: 11px 10px; }
+  #cls-json { font-size: 16px; }
 
   /* --- 1. 셋업 --- */
   #screen-setup { align-items: flex-start; padding: 16px 12px 28px; overflow-y: auto; }

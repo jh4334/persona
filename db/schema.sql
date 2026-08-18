@@ -1,10 +1,10 @@
--- 보이는 교실 — Supabase 스키마 (v0.6 1단계: 세션 스냅샷)
+-- 보이는 교실 — Supabase 스키마
 --
 -- 적용 방법: Supabase 대시보드 → SQL Editor → 이 파일 내용을 붙여넣고 Run.
 -- 여러 번 실행해도 안전하다 (전부 if not exists / or replace).
 --
--- 이 단계의 목표는 "서버를 갈아끼워도 진행 중 수업이 살아남는 것"이다.
--- 학급·전사·리포트 테이블은 인증이 붙는 다음 단계에서 추가한다.
+-- 세션 스냅샷(stage_sessions)과 교사가 만든 학급(classrooms)을 담는다.
+-- 전사·리포트는 아직 서버 파일로만 남는다.
 
 -- ---------------------------------------------------------------------------
 -- 세션 스냅샷
@@ -59,6 +59,43 @@ create policy "own sessions" on public.stage_sessions
     with check (user_id = auth.uid());
 
 -- anon(로그인 안 한 브라우저)에는 어떤 정책도 주지 않는다 → 전면 차단.
+
+-- ---------------------------------------------------------------------------
+-- 내 학급 (교사가 만든 학급 페르소나)
+-- ---------------------------------------------------------------------------
+--
+-- 저장소의 `personas/*.json`은 모두에게 보이는 읽기 전용 샘플로 남고, 교사가
+-- 직접 만든 학급만 여기 들어온다. 세션 스냅샷과 달리 이중 기록을 하지 않는다 —
+-- 스냅샷은 몇 시간이면 사라지는 사본이지만 학급은 교사가 만든 원본이라,
+-- 두 곳에 두면 어긋났을 때 무엇이 맞는지 알 수 없다.
+
+create table if not exists public.classrooms (
+    id             uuid primary key default gen_random_uuid(),
+    user_id        uuid not null references auth.users(id) on delete cascade,
+    name           text not null,
+    grade          text,
+    student_count  integer,
+    data           jsonb not null,          -- 학급 JSON 원본 (v2.1 스키마)
+    created_at     timestamptz not null default now(),
+    updated_at     timestamptz not null default now()
+);
+
+create index if not exists classrooms_user_idx
+    on public.classrooms (user_id, updated_at desc);
+
+drop trigger if exists classrooms_touch on public.classrooms;
+create trigger classrooms_touch
+    before update on public.classrooms
+    for each row execute function public.touch_updated_at();
+
+alter table public.classrooms enable row level security;
+
+drop policy if exists "own classrooms" on public.classrooms;
+create policy "own classrooms" on public.classrooms
+    for all
+    to authenticated
+    using (user_id = auth.uid())
+    with check (user_id = auth.uid());
 
 -- ---------------------------------------------------------------------------
 -- 보관 기간 정리

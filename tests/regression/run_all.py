@@ -22,8 +22,9 @@ def main() -> int:
     failures = []
     t0 = time.time()
     for t in tests:
-        # 스위트 간 격리: 이전 스위트가 남긴 세션 스냅샷·리포트가 다음 가정을 깨지 않게
+        # 스위트 간 격리: 이전 스위트가 남긴 세션 스냅샷·학급이 다음 가정을 깨지 않게
         shutil.rmtree(REPO / ".sessions", ignore_errors=True)
+        shutil.rmtree(REPO / ".classrooms", ignore_errors=True)
         started = time.time()
         r = subprocess.run([sys.executable, str(t)], cwd=str(HERE),
                            capture_output=True, text=True)

@@ -78,47 +78,61 @@ class Classroom:
     students: list[Student]
 
 
-def load_classroom(path: str | Path) -> Classroom:
-    """학급 JSON을 읽는다. 형식 오류는 교사가 파일을 고칠 수 있게 한국어로 짚어 준다."""
-    p = Path(path)
+def loads_classroom(text: str, label: str = "학급 데이터") -> Classroom:
+    """학급 JSON 문자열을 읽는다. 형식 오류는 교사가 고칠 수 있게 한국어로 짚어 준다."""
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(text)
     except json.JSONDecodeError as e:
         raise ValueError(
-            f"{p.name}: JSON 문법 오류입니다 — {e.lineno}행 {e.colno}열 근처를 확인해 주세요. "
+            f"{label}: JSON 문법 오류입니다 — {e.lineno}행 {e.colno}열 근처를 확인해 주세요. "
             "(따옴표 누락, 마지막 항목 뒤의 쉼표가 흔한 원인입니다)"
         ) from e
+    return parse_classroom(data, label)
+
+
+def load_classroom(path: str | Path) -> Classroom:
+    """학급 JSON 파일을 읽는다."""
+    p = Path(path)
+    return loads_classroom(p.read_text(encoding="utf-8"), p.name)
+
+
+def parse_classroom(data: object, label: str = "학급 데이터") -> Classroom:
+    """이미 파싱된 학급 데이터를 검증해 Classroom으로 만든다.
+
+    파일에서 왔든 API 본문·데이터베이스에서 왔든 같은 규칙으로 검증한다.
+    `label`은 오류 메시지 앞에 붙는 출처 표시(파일명 등)다.
+    """
     if not isinstance(data, dict) or not isinstance(data.get("students"), list):
-        raise ValueError(f'{p.name}: 최상위에 "students" 목록이 있어야 합니다.')
+        raise ValueError(f'{label}: 최상위에 "students" 목록이 있어야 합니다.')
 
     students = []
     seen_ids: set[str] = set()
     for idx, s in enumerate(data["students"]):
         where = f"students[{idx}]"
         if not isinstance(s, dict):
-            raise ValueError(f"{p.name}: {where}가 객체({{...}})가 아닙니다.")
+            raise ValueError(f"{label}: {where}가 객체({{...}})가 아닙니다.")
         sid = str(s.get("id") or "").strip()
         if not sid:
-            raise ValueError(f'{p.name}: {where}에 id가 없습니다. 예: "id": "S{idx + 1:02d}"')
+            raise ValueError(f'{label}: {where}에 id가 없습니다. 예: "id": "S{idx + 1:02d}"')
         name = str(s.get("name") or "").strip()
         if not name:
-            raise ValueError(f"{p.name}: 학생 {sid}에 name(이름)이 없습니다.")
+            raise ValueError(f"{label}: 학생 {sid}에 name(이름)이 없습니다.")
         if sid.upper() in seen_ids:
-            raise ValueError(f"{p.name}: 학생 id {sid}가 중복됩니다. id는 학생마다 달라야 합니다.")
+            raise ValueError(f"{label}: 학생 id {sid}가 중복됩니다. id는 학생마다 달라야 합니다.")
         seen_ids.add(sid.upper())
 
         interests = s.get("interests", [])
         if isinstance(interests, str):          # "코딩, 수학" 처럼 적어도 받아 준다
             interests = [t.strip() for t in interests.split(",") if t.strip()]
         elif not isinstance(interests, list):
-            raise ValueError(f'{p.name}: 학생 {name}의 interests는 목록이어야 합니다. 예: ["코딩", "축구"]')
+            raise ValueError(f'{label}: 학생 {name}의 interests는 목록이어야 합니다. 예: ["코딩", "축구"]')
 
         groups = {}
         for g in ATTRIBUTE_GROUPS:
             raw = s.get(g, {})
             if not isinstance(raw, dict):
                 raise ValueError(
-                    f'{p.name}: 학생 {name}의 {g} 속성은 {{"속성명": "값"}} 형태여야 합니다.'
+                    f'{label}: 학생 {name}의 {g} 속성은 {{"속성명": "값"}} 형태여야 합니다.'
                 )
             groups[g] = {str(k): str(v) for k, v in raw.items()}
 
@@ -137,7 +151,7 @@ def load_classroom(path: str | Path) -> Classroom:
             )
         )
     if not students:
-        raise ValueError(f"{p.name}: students 목록이 비어 있습니다. 학생을 1명 이상 넣어 주세요.")
+        raise ValueError(f"{label}: students 목록이 비어 있습니다. 학생을 1명 이상 넣어 주세요.")
     return Classroom(
         class_name=data.get("class_name", "이름 없는 학급"),
         grade=data.get("grade", ""),

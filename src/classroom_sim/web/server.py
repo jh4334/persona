@@ -35,8 +35,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..personas import Classroom, load_classroom
+from ..personas import Classroom, load_classroom, parse_classroom
 from . import auth as _auth
+from .classrooms import ClassroomError, ClassroomLibrary
 from .store import make_store, supabase_config
 
 # ---------------------------------------------------------------------------
@@ -137,6 +138,9 @@ _SESSIONS_GUARD = threading.Lock()
 SNAP_DIR = ROOT / ".sessions"
 STORE = make_store(SNAP_DIR)
 
+# 학급 서가 — 저장소의 샘플(읽기 전용) + 교사가 만든 내 학급(사용자별)
+LIBRARY = ClassroomLibrary(ROOT, ROOT / ".classrooms")
+
 
 def _persist_session(sid: str, rec: SessionRecord) -> None:
     """턴이 끝날 때마다 세션 상태를 저장한다. 실패해도 수업은 계속된다."""
@@ -178,7 +182,7 @@ def _restore_sessions() -> None:
             if len(SESSIONS) >= MAX_SESSIONS:
                 break
             meta = payload.get("meta") or {}
-            classroom = load_classroom(ROOT / meta["classroom_path"])
+            classroom = _classroom_of(meta)
             lesson_text = (ROOT / meta["lesson_path"]).read_text(encoding="utf-8")
             session, backend_used = _make_session(classroom, lesson_text, meta.get("backend", "mock"), None)
             session.load_state(snap)
@@ -187,8 +191,39 @@ def _restore_sessions() -> None:
             SESSIONS[sid] = rec
             log.info("session restored: %s class=%s turn=%s", sid[:8],
                      classroom.class_name, snap.get("state", {}).get("turn"))
+        except (ClassroomError, ValueError, KeyError, OSError) as exc:
+            # 학급·수업안이 사라진 경우 — 예상 가능한 상황이라 스택까지 남기지 않는다
+            log.warning("session restore skipped: %s (%s)", sid[:8], exc)
+            _drop_snapshot(sid)
         except Exception:
             log.exception("session restore failed: %s (스냅샷을 건너뜁니다)", sid[:8])
+
+
+def _classroom_id(req: "CreateSessionReq") -> str:
+    """요청에서 학급 id를 뽑는다. 옛 클라이언트의 classroom_path도 받아 준다."""
+    cid = (req.classroom_id or "").strip()
+    if cid:
+        return cid
+    path = (req.classroom_path or "").strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="학급을 선택해 주세요.")
+    # "personas/class_6_3.json" → "sample:class_6_3"
+    return "sample:" + Path(path).stem
+
+
+def _classroom_of(meta: dict) -> Classroom:
+    """스냅샷 meta에서 학급을 복원한다.
+
+    스냅샷에 담긴 원본을 가장 먼저 쓴다. 그래야 수업 중에 학급을 지우거나
+    고쳤어도 진행 중이던 수업은 시작할 때의 학생들 그대로 이어진다.
+    """
+    data = meta.get("classroom_data")
+    if isinstance(data, dict):
+        return parse_classroom(data, "학급")
+    cid = meta.get("classroom_id")
+    if cid:
+        return LIBRARY.resolve(meta.get("user_id"), cid)[0]
+    return load_classroom(ROOT / meta["classroom_path"])   # v0.6-3 이전 스냅샷
 
 
 def _evict_stale() -> None:
@@ -341,10 +376,15 @@ def _check_create_rate(client_ip: str) -> None:
 
 
 class CreateSessionReq(BaseModel):
-    classroom_path: str
     lesson_path: str
+    classroom_id: str = ""       # "sample:class_6_3" 또는 내 학급의 uuid
+    classroom_path: str = ""     # 옛 클라이언트 호환 — "personas/class_6_3.json"
     backend: str = "mock"
     seed: int | None = None
+
+
+class CreateClassroomReq(BaseModel):
+    json_text: str
 
 
 class TurnReq(BaseModel):
@@ -361,23 +401,29 @@ def index() -> FileResponse:
 
 @app.get("/api/classrooms")
 def list_classrooms(request: Request) -> list[dict]:
-    """personas/*.json 스캔 → [{path, class_name, grade, count}]"""
-    _current_user(request)      # 로그인 강제 시 학급 목록도 열람 불가
-    out: list[dict] = []
-    for p in sorted((ROOT / "personas").glob("*.json")):
-        try:
-            c = load_classroom(p)
-        except Exception:
-            continue
-        out.append(
-            {
-                "path": str(p.relative_to(ROOT)),
-                "class_name": c.class_name,
-                "grade": c.grade,
-                "count": len(c.students),
-            }
-        )
-    return out
+    """내 학급(위) + 샘플 학급(아래) → [{id, class_name, grade, count, mine}]"""
+    user = _current_user(request)   # 로그인 강제 시 학급 목록도 열람 불가
+    return LIBRARY.list(user.id if user else None)
+
+
+@app.post("/api/classrooms", status_code=201)
+def create_classroom(req: CreateClassroomReq, request: Request) -> dict:
+    """교사가 붙여넣거나 올린 학급 JSON을 검증해 저장한다."""
+    user = _current_user(request)
+    try:
+        return LIBRARY.create(user.id if user else None, req.json_text or "")
+    except (ClassroomError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/classrooms/{classroom_id}")
+def delete_classroom(classroom_id: str, request: Request) -> dict:
+    user = _current_user(request)
+    try:
+        LIBRARY.delete(user.id if user else None, classroom_id)
+    except ClassroomError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"deleted": classroom_id}
 
 
 @app.get("/api/lessons")
@@ -448,11 +494,11 @@ def create_session(req: CreateSessionReq, request: Request) -> dict:
     if req.backend not in ALLOWED_BACKENDS:
         raise HTTPException(status_code=400,
                             detail=f"지원하지 않는 백엔드입니다: {req.backend!r} (가능: {', '.join(ALLOWED_BACKENDS)})")
-    cpath = _safe_path(req.classroom_path, "personas", ".json")
     lpath = _safe_path(req.lesson_path, "lessons", ".md")
+    cid = _classroom_id(req)
     try:
-        classroom = load_classroom(cpath)
-    except Exception as exc:
+        classroom, classroom_data = LIBRARY.resolve(user.id if user else None, cid)
+    except (ClassroomError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"학급 로드 실패: {exc}") from exc
     if len(classroom.students) > MAX_STUDENTS:
         raise HTTPException(status_code=400,
@@ -469,7 +515,10 @@ def create_session(req: CreateSessionReq, request: Request) -> dict:
         session,
         classroom,
         {
-            "classroom_path": str(cpath.relative_to(ROOT)),
+            "classroom_id": cid,
+            # 학급 원본을 함께 남긴다 — 수업 중에 학급을 지우거나 고쳐도
+            # 진행 중이던 수업은 시작할 때의 학생들로 되살아나야 한다.
+            "classroom_data": classroom_data,
             "lesson_path": str(lpath.relative_to(ROOT)),
             "backend": backend_used,
             "class_name": classroom.class_name,

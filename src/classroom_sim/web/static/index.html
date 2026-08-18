@@ -57,6 +57,27 @@
       <span>학급</span>
       <select id="sel-classroom"></select>
     </label>
+    <div class="cls-actions">
+      <button id="btn-cls-add" type="button">+ 내 학급 만들기</button>
+      <button id="btn-cls-del" type="button" hidden>선택한 학급 삭제</button>
+    </div>
+
+    <div id="cls-editor" class="cls-editor" hidden>
+      <p class="cls-help">
+        학급 JSON을 붙여넣거나 파일을 고르세요.
+        형식은 <code>personas/class_6_3.json</code>과 같습니다 —
+        <code>class_name</code>, <code>grade</code>, 그리고 학생마다
+        <code>id</code>·<code>name</code>이 필요합니다.
+      </p>
+      <input id="cls-file" type="file" accept=".json,application/json">
+      <textarea id="cls-json" rows="8" spellcheck="false"
+                placeholder='{&#10;  "class_name": "행복초 5학년 2반",&#10;  "grade": "초등학교 5학년",&#10;  "students": [&#10;    { "id": "S01", "name": "김하늘", "achievement_level": "상" }&#10;  ]&#10;}'></textarea>
+      <div class="cls-actions">
+        <button id="btn-cls-save" class="btn-primary" type="button">저장</button>
+        <button id="btn-cls-cancel" type="button">취소</button>
+      </div>
+      <p id="cls-error" class="error" hidden></p>
+    </div>
     <label class="field">
       <span>단원 / 수업안</span>
       <select id="sel-lesson"></select>
