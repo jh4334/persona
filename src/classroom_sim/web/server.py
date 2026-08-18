@@ -12,6 +12,8 @@ dataclasses.asdict 기반이다.
     CLASSROOM_SIM_FAKE=1   엔진(stage/) 대신 web/dev_fake.py의 FakeSession 사용
                            (엔진이 아직 없어도 프론트엔드를 완전히 개발·테스트 가능)
     CLASSROOM_SIM_ROOT     personas/·lessons/ 를 찾을 저장소 루트 (기본: 자동 탐지)
+    SUPABASE_URL/_KEY      설정하면 세션 스냅샷을 디스크와 Supabase에 함께 기록
+                           (미설정이면 디스크만 — 자세한 내용은 web/store.py)
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..personas import Classroom, load_classroom
+from .store import make_store, supabase_config
 
 # ---------------------------------------------------------------------------
 # 경로
@@ -123,47 +126,48 @@ class SessionRecord:
 SESSIONS: dict[str, SessionRecord] = {}
 _SESSIONS_GUARD = threading.Lock()
 
-# 세션 스냅샷 — 서버가 재시작돼도 진행 중 수업을 되살릴 수 있게 디스크에 남긴다.
+# 세션 스냅샷 — 서버가 재시작돼도 진행 중 수업을 되살릴 수 있게 남긴다.
+# 저장 위치는 store.make_store가 정한다: 디스크 기본, SUPABASE_* 설정 시 이중 기록.
 SNAP_DIR = ROOT / ".sessions"
+STORE = make_store(SNAP_DIR)
 
 
 def _persist_session(sid: str, rec: SessionRecord) -> None:
-    """턴이 끝날 때마다 세션 상태를 디스크에 남긴다. 실패해도 수업은 계속된다."""
+    """턴이 끝날 때마다 세션 상태를 저장한다. 실패해도 수업은 계속된다."""
     if not hasattr(rec.session, "dump_state"):
         return  # FakeSession 등 스냅샷 미지원 세션
     try:
-        SNAP_DIR.mkdir(parents=True, exist_ok=True)
-        payload = {
+        STORE.save(sid, {
             "meta": rec.meta,
             "saved_at": time.time(),
             "snapshot": rec.session.dump_state(),
-        }
-        tmp = SNAP_DIR / f"{sid}.json.tmp"
-        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(SNAP_DIR / f"{sid}.json")   # 원자적 교체 — 쓰다 만 파일 방지
+        })
     except Exception:
         log.exception("session persist failed: %s", sid[:8])
 
 
 def _drop_snapshot(sid: str) -> None:
     try:
-        (SNAP_DIR / f"{sid}.json").unlink(missing_ok=True)
+        STORE.delete(sid)
     except Exception:
         pass
 
 
 def _restore_sessions() -> None:
-    """서버 기동 시 디스크 스냅샷에서 진행 중이던 수업을 되살린다."""
-    if _use_fake() or not SNAP_DIR.is_dir():
+    """서버 기동 시 스냅샷에서 진행 중이던 수업을 되살린다."""
+    if _use_fake():
         return
-    for f in sorted(SNAP_DIR.glob("*.json")):
-        sid = f.stem
+    try:
+        rows = STORE.load_all(newer_than=time.time() - SESSION_IDLE_TTL, limit=MAX_SESSIONS)
+    except Exception:
+        log.exception("session restore skipped (스냅샷 조회 실패)")
+        return
+    for sid, payload in rows:
         try:
-            payload = json.loads(f.read_text(encoding="utf-8"))
             saved_at = float(payload.get("saved_at", 0))
             snap = payload.get("snapshot") or {}
-            if time.time() - saved_at > SESSION_IDLE_TTL or snap.get("state", {}).get("ended"):
-                f.unlink(missing_ok=True)
+            if snap.get("state", {}).get("ended"):
+                _drop_snapshot(sid)
                 continue
             if len(SESSIONS) >= MAX_SESSIONS:
                 break
@@ -364,6 +368,7 @@ def healthz() -> dict:
         "uptime_s": int(time.time() - START_TIME),
         "sessions": len(SESSIONS),
         "max_sessions": MAX_SESSIONS,
+        "store": STORE.name,          # disk / disk+supabase — 배포 후 설정이 먹었는지 확인용
     }
 
 
@@ -397,6 +402,7 @@ def create_session(req: CreateSessionReq, request: Request) -> dict:
             "classroom_path": str(cpath.relative_to(ROOT)),
             "lesson_path": str(lpath.relative_to(ROOT)),
             "backend": backend_used,
+            "class_name": classroom.class_name,
         },
     )
     log.info("session created: %s class=%s students=%d backend=%s lesson=%s",
