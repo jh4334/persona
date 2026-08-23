@@ -248,6 +248,33 @@ TOOLS = [
     },
 ]
 
+_TOOL_TITLES = {
+    "list_classrooms": "학급 목록 보기",
+    "create_classroom": "학급 만들기",
+    "start_session": "수업 시작하기",
+    "record_turn": "수업 장면 기록하기",
+    "get_state": "수업 상태 보기",
+    "trigger_incident": "돌발 상황 만들기",
+    "end_session": "수업 마치기",
+}
+_READ_ONLY_TOOLS = {"list_classrooms", "get_state"}
+_OAUTH_SCHEMES = [{"type": "oauth2", "scopes": ["openid", "email"]}]
+
+for _tool in TOOLS:
+    _read_only = _tool["name"] in _READ_ONLY_TOOLS
+    _tool.update({
+        "title": _TOOL_TITLES[_tool["name"]],
+        "outputSchema": {"type": "object", "additionalProperties": True},
+        "securitySchemes": _OAUTH_SCHEMES,
+        "annotations": {
+            "readOnlyHint": _read_only,
+            "destructiveHint": False,
+            "openWorldHint": False,
+            "idempotentHint": _read_only,
+        },
+        "_meta": {"securitySchemes": _OAUTH_SCHEMES},
+    })
+
 REPORT_TEMPLATE = """아래 틀로 교사용 수업 리포트를 완성해 주세요. 통계는 서버가
 센 실제 값이니 그대로 인용하고, 해석과 제안을 더하세요.
 

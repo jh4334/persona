@@ -47,6 +47,27 @@
   </div>
 </section>
 
+<section id="screen-oauth" class="screen">
+  <div class="setup-box oauth-box">
+    <h1 class="pixel-title">ChatGPT 연결</h1>
+    <p class="subtitle"><b id="oauth-client-name">ChatGPT</b>에서 보이는 교실 사용을 요청했습니다.</p>
+    <div class="oauth-permissions">
+      <strong>허용되는 작업</strong>
+      <ul>
+        <li>내 학급 목록을 읽고 새 학급 만들기</li>
+        <li>수업 시뮬레이션을 진행하고 상태 기록하기</li>
+        <li>수업 리포트를 내 계정에 저장하기</li>
+      </ul>
+    </div>
+    <p class="disclaimer">다른 교사의 학급과 수업 기록에는 접근할 수 없습니다. 연결은 나중에 Supabase에서 해제할 수 있습니다.</p>
+    <p id="oauth-note" class="login-note" hidden></p>
+    <div class="oauth-actions">
+      <button id="btn-oauth-approve" class="btn-primary" type="button">연결 허용</button>
+      <button id="btn-oauth-deny" type="button">거부</button>
+    </div>
+  </div>
+</section>
+
 <!-- ══════════════ 1. 셋업 화면 ══════════════ -->
 <section id="screen-setup" class="screen">
   <div class="setup-box">

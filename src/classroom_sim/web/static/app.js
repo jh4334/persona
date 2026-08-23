@@ -169,6 +169,7 @@ async function api(path, options, _retried) {
    ============================================================== */
 
 const AUTH_LS = 'cs_auth';
+const OAUTH_PENDING_LS = 'cs_oauth_pending';
 
 const Auth = {
   cfg: { required: false, url: '', anon_key: '' },
@@ -208,6 +209,42 @@ const Auth = {
       throw err;
     }
     return j;
+  },
+
+  async oauth(path, method, body) {
+    const res = await fetch(this.cfg.url + '/auth/v1' + path, {
+      method: method || 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: this.cfg.anon_key,
+        Authorization: 'Bearer ' + this.tok.access_token,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    let j = null;
+    try { j = await res.json(); } catch (e) {}
+    if (!res.ok) {
+      const msg = (j && (j.error_description || j.msg || j.message)) || ('오류 ' + res.status);
+      throw new Error(msg);
+    }
+    return j;
+  },
+
+  authorizationId() {
+    const id = new URLSearchParams(location.search).get('authorization_id') || '';
+    if (id) {
+      try { localStorage.setItem(OAUTH_PENDING_LS, id); } catch (e) {}
+    }
+    return id;
+  },
+
+  oauthDetails(id) {
+    return this.oauth('/oauth/authorizations/' + encodeURIComponent(id));
+  },
+
+  oauthDecision(id, action) {
+    return this.oauth('/oauth/authorizations/' + encodeURIComponent(id) + '/consent',
+                      'POST', { action });
   },
 
   /** 응답의 토큰 묶음을 만료 시각과 함께 보관 */
@@ -265,11 +302,18 @@ const Auth = {
       refresh_token: q.get('refresh_token'),
       expires_in: Number(q.get('expires_in') || 3600),
     });
+    let pending = '';
+    try { pending = localStorage.getItem(OAUTH_PENDING_LS) || ''; } catch (e) {}
+    if (pending && !new URLSearchParams(location.search).get('authorization_id')) {
+      location.replace('/oauth/consent?authorization_id=' + encodeURIComponent(pending));
+      return { redirecting: true };
+    }
     return { ok: true };
   },
 
   /** 앱 시작 전에 로그인 상태를 확정한다. 로그인 화면이 필요하면 true */
   async boot() {
+    this.authorizationId();
     let cfg;
     try { cfg = await api('/api/auth/config'); }
     catch (e) { return false; }        // 서버가 답을 못 하면 기존처럼 진행
@@ -278,6 +322,7 @@ const Auth = {
 
     this.load();
     const fromLink = this.takeFromHash();
+    if (fromLink && fromLink.redirecting) return true;
     if (fromLink && fromLink.error) {
       this.requireLogin('로그인 링크가 만료되었거나 이미 사용되었습니다. 다시 시도해 주세요.');
       return true;
@@ -1922,12 +1967,57 @@ function initLogin() {
   });
 }
 
+async function initOAuthConsent(id) {
+  document.body.dataset.screen = 'oauth';
+  const note = $('#oauth-note');
+  const showNote = (text, bad) => {
+    note.textContent = text || '';
+    note.classList.toggle('bad', !!bad);
+    note.hidden = !text;
+  };
+  let details;
+  try {
+    details = await Auth.oauthDetails(id);
+  } catch (err) {
+    showNote('연결 요청을 확인하지 못했습니다. ChatGPT에서 다시 연결해 주세요.', true);
+    return;
+  }
+  if (details.redirect_url && !details.authorization_id) {
+    location.assign(details.redirect_url);
+    return;
+  }
+  $('#oauth-client-name').textContent = (details.client && details.client.name) || 'ChatGPT';
+  const decide = async (action) => {
+    const approve = $('#btn-oauth-approve');
+    const deny = $('#btn-oauth-deny');
+    approve.disabled = true;
+    deny.disabled = true;
+    showNote(action === 'approve' ? '연결을 승인하는 중입니다.' : '연결 요청을 거부하는 중입니다.');
+    try {
+      const result = await Auth.oauthDecision(id, action);
+      try { localStorage.removeItem(OAUTH_PENDING_LS); } catch (e) {}
+      location.assign(result.redirect_url);
+    } catch (err) {
+      showNote('연결 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.', true);
+      approve.disabled = false;
+      deny.disabled = false;
+    }
+  };
+  $('#btn-oauth-approve').addEventListener('click', () => decide('approve'));
+  $('#btn-oauth-deny').addEventListener('click', () => decide('deny'));
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   initLogin();
   $('#btn-logout').addEventListener('click', () => Auth.signOut());
 
   // 로그인이 필요하면 셋업 화면 대신 로그인 화면에서 멈춘다
   if (await Auth.boot()) return;
+  const authorizationId = Auth.authorizationId();
+  if (authorizationId) {
+    await initOAuthConsent(authorizationId);
+    return;
+  }
   if (Auth.cfg.required) {
     $('#account-email').textContent = Auth.email || '로그인됨';
     $('#account-row').hidden = false;

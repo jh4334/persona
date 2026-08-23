@@ -315,6 +315,14 @@ if AUTH.required:
     log.info("인증 활성 — 로그인한 사용자만 수업을 만들 수 있습니다 (%s)", AUTH.url)
 
 
+def _public_base(request: Request) -> str:
+    return (os.environ.get("CLASSROOM_SIM_PUBLIC_URL") or str(request.base_url)).rstrip("/")
+
+
+def _mcp_resource_metadata_url(request: Request) -> str:
+    return f"{_public_base(request)}/.well-known/oauth-protected-resource/mcp"
+
+
 def _current_user(request: Request) -> _auth.User | None:
     """요청의 Bearer 토큰에서 사용자를 확인한다.
 
@@ -476,6 +484,11 @@ def index() -> FileResponse:
     return FileResponse(path)
 
 
+@app.get("/oauth/consent")
+def oauth_consent() -> FileResponse:
+    return index()
+
+
 @app.get("/api/classrooms")
 def list_classrooms(request: Request) -> list[dict]:
     """내 학급(위) + 샘플 학급(아래) → [{id, class_name, grade, count, mine}]"""
@@ -517,7 +530,16 @@ async def mcp_endpoint(request: Request):
     ChatGPT 개발자 모드에 이 주소를 등록하면 도구 7종이 노출된다.
     인증은 웹판과 같은 Bearer 토큰을 쓴다.
     """
-    uid, token = _who(request)
+    try:
+        uid, token = _who(request)
+    except HTTPException as exc:
+        if exc.status_code == 401 and AUTH.required:
+            headers = dict(exc.headers or {})
+            headers["WWW-Authenticate"] = (
+                f'Bearer resource_metadata="{_mcp_resource_metadata_url(request)}"'
+            )
+            raise HTTPException(status_code=401, detail=exc.detail, headers=headers) from exc
+        raise
     try:
         body = await request.json()
     except Exception:
@@ -540,6 +562,16 @@ def mcp_info() -> dict:
             "tools": [t["name"] for t in _mcp.TOOLS],
             "auth": "required" if AUTH.required else "open",
             "docs": "docs/specs/v0.6_chatgpt_app.md"}
+
+
+@app.get("/.well-known/oauth-protected-resource/mcp")
+def mcp_oauth_resource(request: Request) -> dict:
+    return {
+        "resource": f"{_public_base(request)}/mcp",
+        "authorization_servers": [f"{AUTH.url}/auth/v1"],
+        "bearer_methods_supported": ["header"],
+        "scopes_supported": ["openid", "email"],
+    }
 
 
 @app.get("/api/reports")
