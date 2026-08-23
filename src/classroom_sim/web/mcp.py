@@ -111,6 +111,54 @@ class McpSession:
         self.transcript.append({"turn": self.turn, "actor": actor,
                                 "kind": kind, "content": content})
 
+    def dump_state(self) -> dict:
+        return {
+            "version": 1,
+            "id": self.id,
+            "user_id": self.user_id,
+            "classroom": self.classroom,
+            "lesson": self.lesson,
+            "turn": self.turn,
+            "minute": self.minute,
+            "phase": self.phase,
+            "ended": self.ended,
+            "created_at": self.created_at,
+            "last_used": self.last_used,
+            "transcript": self.transcript,
+            "speak_log": self.speak_log,
+            "incidents": self.incidents,
+            "states": self.states,
+        }
+
+    def load_state(self, data: dict) -> None:
+        self.turn = int(data.get("turn") or 0)
+        self.minute = int(data.get("minute") or 0)
+        self.phase = str(data.get("phase") or "도입")
+        self.ended = bool(data.get("ended"))
+        self.created_at = float(data.get("created_at") or time.time())
+        self.last_used = float(data.get("last_used") or time.time())
+        self.transcript = list(data.get("transcript") or [])
+        self.speak_log = list(data.get("speak_log") or [])
+        self.incidents = list(data.get("incidents") or [])
+        states = data.get("states") or {}
+        if not isinstance(states, dict) or set(states) != set(self.personas):
+            raise ValueError("학생 상태가 학급 명단과 맞지 않습니다.")
+        self.states = {sid: dict(states[sid]) for sid in self.personas}
+
+    @classmethod
+    def from_state(cls, sid: str, user_id: str | None, data: dict) -> "McpSession":
+        if data.get("version") != 1 or data.get("id") != sid:
+            raise ValueError("지원하지 않는 MCP 수업 상태입니다.")
+        if data.get("user_id") != user_id:
+            raise ValueError("수업 주인이 일치하지 않습니다.")
+        classroom = data.get("classroom")
+        lesson = data.get("lesson")
+        if not isinstance(classroom, dict) or not isinstance(lesson, str):
+            raise ValueError("MCP 수업 상태가 올바르지 않습니다.")
+        session = cls(sid, user_id, classroom, lesson[:200000])
+        session.load_state(data)
+        return session
+
     def state_table(self) -> list[dict]:
         return [{
             "id": sid,
@@ -304,10 +352,11 @@ REPORT_TEMPLATE = """아래 틀로 교사용 수업 리포트를 완성해 주�
 class McpServer:
     """도구 호출을 처리한다. 저장소·인증은 web/server.py의 것을 그대로 빌려 쓴다."""
 
-    def __init__(self, library, reports, incidents_mod) -> None:
+    def __init__(self, library, reports, incidents_mod, store=None) -> None:
         self.library = library
         self.reports = reports
         self.incidents = incidents_mod
+        self.store = store
         self.sessions: dict[str, McpSession] = {}
 
     # -- 살림 -------------------------------------------------------------
@@ -319,9 +368,60 @@ class McpServer:
             oldest = min(self.sessions, key=lambda s: self.sessions[s].last_used)
             self.sessions.pop(oldest, None)
 
-    def _session(self, args: dict, user_id: str | None) -> McpSession:
+    def _persist(self, session: McpSession, token: str | None) -> None:
+        if self.store is None:
+            return
+        if getattr(self.store, "name", "none") == "none":
+            raise RpcError(-32603, "수업 상태 저장소가 설정되지 않았습니다.")
+        try:
+            self.store.save(session.id, {
+                "meta": {
+                    "kind": "mcp",
+                    "user_id": session.user_id,
+                    "class_name": session.classroom.get("class_name", ""),
+                },
+                "saved_at": time.time(),
+                "snapshot": session.dump_state(),
+            }, token=token)
+        except RpcError:
+            raise
+        except Exception as exc:
+            log.warning("mcp session persist failed: %s (%s)", session.id[:8], exc)
+            raise RpcError(-32603, "수업 상태를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.") from exc
+
+    def _restore(self, sid: str, user_id: str | None,
+                 token: str | None) -> McpSession | None:
+        if self.store is None:
+            return None
+        try:
+            payload = self.store.load_one(sid, token=token)
+        except Exception as exc:
+            log.warning("mcp session restore failed: %s (%s)", sid[:8], exc)
+            raise RpcError(-32603, "수업 상태를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.") from exc
+        if not isinstance(payload, dict):
+            return None
+        meta = payload.get("meta") or {}
+        saved_at = float(payload.get("saved_at") or 0)
+        if meta.get("kind") != "mcp" or meta.get("user_id") != user_id:
+            return None
+        if time.time() - saved_at > MCP_TTL:
+            try:
+                self.store.delete(sid, token=token)
+            except Exception:
+                pass
+            return None
+        try:
+            session = McpSession.from_state(sid, user_id, payload.get("snapshot") or {})
+        except (TypeError, ValueError):
+            return None
+        self.sessions[sid] = session
+        log.info("mcp session restored: %s turn=%d", sid[:8], session.turn)
+        return session
+
+    def _session(self, args: dict, user_id: str | None,
+                 token: str | None) -> McpSession:
         sid = str(args.get("session_id") or "")
-        s = self.sessions.get(sid)
+        s = self.sessions.get(sid) or self._restore(sid, user_id, token)
         if s is None:
             raise RpcError(-32602, "수업을 찾을 수 없습니다. start_session으로 새로 시작해 주세요.")
         if s.user_id != user_id:
@@ -360,9 +460,14 @@ class McpServer:
             raise RpcError(-32602, str(exc)) from exc
 
         self._evict()
-        sid = uuid.uuid4().hex[:12]
+        sid = "mcp_" + uuid.uuid4().hex[:12]
         s = McpSession(sid, user_id, data, lesson[:200000])
         self.sessions[sid] = s
+        try:
+            self._persist(s, token)
+        except RpcError:
+            self.sessions.pop(sid, None)
+            raise
         log.info("mcp session started: %s class=%s students=%d",
                  sid[:8], data.get("class_name", ""), len(s.roster))
         return {
@@ -376,7 +481,8 @@ class McpServer:
         }
 
     def record_turn(self, args, user_id, token) -> dict:
-        s = self._session(args, user_id)
+        s = self._session(args, user_id, token)
+        before = s.dump_state()
         teacher = (args.get("teacher_input") or "").strip()
         if not teacher:
             raise RpcError(-32602, "교사 입력(teacher_input)이 비어 있습니다.")
@@ -412,6 +518,12 @@ class McpServer:
         notes += judge_persona(s.personas, prev, s.states, s.minute)
         notes += judge_equity(s.speak_log, s.roster)
 
+        try:
+            self._persist(s, token)
+        except RpcError:
+            s.load_state(before)
+            raise
+
         return {
             "turn": s.turn,
             "minute": s.minute,
@@ -424,7 +536,7 @@ class McpServer:
         }
 
     def get_state(self, args, user_id, token) -> dict:
-        s = self._session(args, user_id)
+        s = self._session(args, user_id, token)
         return {"turn": s.turn, "minute": s.minute, "phase": s.phase,
                 "class_name": s.classroom.get("class_name", ""),
                 "states": s.state_table(),
@@ -432,7 +544,8 @@ class McpServer:
                 "note": "이 표는 교사만 봅니다. 학생은 자기 게이지를 모릅니다."}
 
     def trigger_incident(self, args, user_id, token) -> dict:
-        s = self._session(args, user_id)
+        s = self._session(args, user_id, token)
+        before = s.dump_state()
         want = (args.get("card") or "").strip() or None
         try:
             card = self.incidents.draw(want, exclude=s.incidents)
@@ -440,14 +553,17 @@ class McpServer:
             raise RpcError(-32602, str(exc)) from exc
         s.incidents.append(card.name)
         s.record("무대", "narration", f"[돌발] {card.name}: {card.description}")
+        try:
+            self._persist(s, token)
+        except RpcError:
+            s.load_state(before)
+            raise
         return {"card": card.name, "description": card.description,
                 "next": "이 상황을 장면으로 풀어내고 record_turn으로 보고하세요."}
 
     def end_session(self, args, user_id, token) -> dict:
         sid = str(args.get("session_id") or "")
-        s = self.sessions.get(sid)
-        if s is None or s.user_id != user_id:
-            raise RpcError(-32602, "수업을 찾을 수 없습니다.")
+        s = self._session(args, user_id, token)
         report = (args.get("report_markdown") or "").strip()
         stats = s.stats()
 
@@ -464,6 +580,11 @@ class McpServer:
 
         # 2차 호출 — 완성된 리포트를 보관한다
         s.ended = True
+        try:
+            self._persist(s, token)
+        except RpcError:
+            s.ended = False
+            raise
         base = f"mcp_{time.strftime('%Y%m%d_%H%M%S')}_{sid[:8]}"
         rid = None
         try:
@@ -476,6 +597,11 @@ class McpServer:
         except Exception:
             log.exception("mcp report save failed: %s", sid[:8])
         self.sessions.pop(sid, None)
+        if self.store is not None:
+            try:
+                self.store.delete(sid, token=token)
+            except Exception as exc:
+                log.warning("mcp session delete failed: %s (%s)", sid[:8], exc)
         log.info("mcp session ended: %s turns=%d saved=%s", sid[:8], s.turn, bool(rid))
         return {"saved": bool(rid), "report_id": rid, "stats": stats,
                 "next": "수업이 저장되었습니다. 웹 화면의 [지난 수업 기록]에서도 볼 수 있습니다."}

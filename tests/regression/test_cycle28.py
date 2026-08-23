@@ -192,9 +192,47 @@ assert r.status_code == 200, r.text
 assert r.json()["turn"] == before + 1, r.json()
 print("⑦ 인스턴스 교체 후 지연 복구로 이어짐 OK (turn %d→%d)" % (before, before + 1))
 
+def mcp_tool(client, name, arguments):
+    response = client.post("/mcp", json={
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": name, "arguments": arguments},
+    })
+    assert response.status_code == 200, response.text
+    result = response.json()["result"]
+    assert result["isError"] is False, result
+    return result["structuredContent"]
+
+
+mcp_started = mcp_tool(c2, "start_session", {
+    "classroom_id": "sample:class_6_3", "lesson_text": "분수 비교 수업",
+})
+mcp_sid = mcp_started["session_id"]
+assert mcp_sid.startswith("mcp_")
+assert any(r["id"] == mcp_sid for r in TABLES["stage_sessions"])
+
+importlib.reload(server)
+c_mcp = TestClient(server.app)
+mcp_turn = mcp_tool(c_mcp, "record_turn", {
+    "session_id": mcp_sid,
+    "teacher_input": "분수를 비교해 봅시다.",
+    "minute": 5,
+    "phase": "전개",
+    "state_updates": {"S01": {"comprehension": 70}},
+    "events": [{"student_id": "S01", "utterance": "분모부터 볼게요."}],
+})
+assert mcp_turn["turn"] == 1, mcp_turn
+
+importlib.reload(server)
+c_mcp2 = TestClient(server.app)
+mcp_state = mcp_tool(c_mcp2, "get_state", {"session_id": mcp_sid})
+assert mcp_state["turn"] == 1 and mcp_state["minute"] == 5, mcp_state
+print("⑦-B MCP도 인스턴스 3개를 건너 원격 복구됨 OK")
+
 # ---------------------------------------------------------------------------
 # ⑧ 저장이 실패하면 교사에게 알린다 (서버리스에서는 곧 유실이므로)
 # ---------------------------------------------------------------------------
+c2 = TestClient(server.app)
+assert c2.get(f"/api/sessions/{sid2}/state").status_code == 200
 FAIL["n"] = 1
 r = c2.post(f"/api/sessions/{sid2}/turn", json={"input": "저장이 실패하는 턴"}).json()
 assert "notice" in r and "저장하지 못했습니다" in r["notice"], r.get("notice")

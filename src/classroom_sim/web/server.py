@@ -219,6 +219,8 @@ def _restore_sessions() -> None:
     for sid, payload in rows:
         if len(SESSIONS) >= MAX_SESSIONS:
             break
+        if str(sid).startswith("mcp_"):
+            continue
         try:
             rec = _rebuild(sid, payload)
             if rec is None:
@@ -520,7 +522,7 @@ def delete_classroom(classroom_id: str, request: Request) -> dict:
 # MCP — ChatGPT가 직접 무대를 진행하는 경로 (web/mcp.py)
 # ---------------------------------------------------------------------------
 
-MCP = _mcp.McpServer(LIBRARY, REPORTS, _incidents)
+MCP = _mcp.McpServer(LIBRARY, REPORTS, _incidents, STORE)
 
 
 @app.post("/mcp")
