@@ -259,15 +259,18 @@ print("⑨ 일반 서버 모드 회귀 — 저장 실패해도 디스크 사본�
 # ⑩ 배포 산출물
 # ---------------------------------------------------------------------------
 root = Path(ROOT)
-for f in ("vercel.json", "api/index.py", "Dockerfile", ".dockerignore",
+for f in ("vercel.json", "app.py", "Dockerfile", ".dockerignore",
           ".vercelignore", ".github/workflows/ci.yml", "requirements.txt"):
     assert (root / f).is_file(), f"{f} 없음"
 
+# Vercel 네이티브 FastAPI 라우팅 — 루트의 app.py 하나가 전 경로를 받는다.
+# rewrite를 두지 않으므로, 진입점이 vercel.json이 가리키는 파일과 같아야 한다.
 vj = json.loads((root / "vercel.json").read_text(encoding="utf-8"))
-assert vj["rewrites"][0]["destination"] == "/api/index", vj
-assert vj["functions"]["api/index.py"]["maxDuration"] >= 60, vj
+assert list(vj["functions"]) == ["app.py"], vj["functions"]
+assert vj["functions"]["app.py"]["maxDuration"] >= 60, vj
+assert not (root / "api").exists(), "옛 진입점 api/ 가 남아 있음 (vercel.json이 안 가리킴)"
 
-idx = (root / "api/index.py").read_text(encoding="utf-8")
+idx = (root / "app.py").read_text(encoding="utf-8")
 assert "from classroom_sim.web.server import app" in idx
 assert 'sys.path.insert(0, str(ROOT / "src"))' in idx
 

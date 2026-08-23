@@ -16,6 +16,8 @@ REPO = HERE.parents[1]
 def main() -> int:
     tests = sorted(HERE.glob("test_cycle*.py"),
                    key=lambda p: int("".join(ch for ch in p.stem if ch.isdigit())))
+    # tests/ 바로 아래의 단위 테스트도 함께 돌린다 — 여기 없으면 CI가 못 본다
+    tests += sorted((REPO / "tests").glob("test_*.py"))
     if not tests:
         print("실행할 테스트가 없습니다.")
         return 1
@@ -30,7 +32,7 @@ def main() -> int:
                            capture_output=True, text=True)
         took = time.time() - started
         ok = r.returncode == 0
-        print(f"{'✅' if ok else '❌'} {t.name:22s} {took:5.1f}s")
+        print(f"{'✅' if ok else '❌'} {t.name:26s} {took:5.1f}s")
         if not ok:
             failures.append(t.name)
             tail = (r.stdout + "\n" + r.stderr).strip().splitlines()[-15:]
