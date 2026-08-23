@@ -1,3 +1,7 @@
+# 웹 서버 (Vercel·컨테이너 공통)
+fastapi>=0.110.0,<1.0
+uvicorn>=0.29.0,<1.0
+httpx>=0.27,<1.0
+
+# anthropic 백엔드에만 필요 — mock 백엔드만 쓸 거면 없어도 된다
 anthropic>=0.120.0
-fastapi>=0.110.0
-uvicorn>=0.29.0

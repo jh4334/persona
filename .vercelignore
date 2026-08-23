@@ -1,0 +1,7 @@
+tests/
+docs/
+reports/
+scripts/
+.sessions/
+.classrooms/
+design-qa.md

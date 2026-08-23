@@ -41,7 +41,7 @@ from ..stage import incidents as _incidents
 from . import mcp as _mcp
 from .classrooms import ClassroomError, ClassroomLibrary
 from .reports import ReportError, ReportLibrary
-from .store import DiskStore, make_store, remote_config
+from .store import DiskStore, make_store, remote_config, stateless
 
 # ---------------------------------------------------------------------------
 # 경로
@@ -152,18 +152,25 @@ LIBRARY = ClassroomLibrary(ROOT, ROOT / ".classrooms")
 REPORTS = ReportLibrary(ROOT / "reports" / "stage")
 
 
-def _persist_session(sid: str, rec: SessionRecord) -> None:
-    """턴이 끝날 때마다 세션 상태를 저장한다. 실패해도 수업은 계속된다."""
+def _persist_session(sid: str, rec: SessionRecord) -> bool:
+    """턴이 끝날 때마다 세션 상태를 저장한다. 저장에 성공했으면 True.
+
+    일반 서버에서는 실패해도 수업이 계속된다 — 메모리에 세션이 남아 있고
+    디스크에도 사본이 있다. 서버리스는 다르다. 저장이 실패하면 다음 요청이
+    다른 인스턴스에 닿는 순간 수업이 통째로 사라지므로, 교사에게 알려야 한다.
+    """
     if not hasattr(rec.session, "dump_state"):
-        return  # FakeSession 등 스냅샷 미지원 세션
+        return True  # FakeSession 등 스냅샷 미지원 세션
     try:
         STORE.save(sid, {
             "meta": rec.meta,
             "saved_at": time.time(),
             "snapshot": rec.session.dump_state(),
         }, token=rec.token)
+        return True
     except Exception:
         log.exception("session persist failed: %s", sid[:8])
+        return False
 
 
 def _drop_snapshot(sid: str, token: str | None = None) -> None:
@@ -200,7 +207,9 @@ def _restore_sessions() -> None:
     필요해지기 때문이다. 원격에만 있는 세션은 그 주인이 요청할 때 _get()이
     자기 토큰으로 되살린다 (지연 복구).
     """
-    if _use_fake():
+    if _use_fake() or stateless():
+        # 서버리스: 로컬 디스크가 비어 있다. 원격 세션은 주인이 요청할 때
+        # _restore_one()이 되살린다 (지연 복구).
         return
     try:
         rows = DISK_STORE.load_all(newer_than=time.time() - SESSION_IDLE_TTL, limit=MAX_SESSIONS)
@@ -414,7 +423,9 @@ def _persona_cards(classroom: Classroom) -> list[dict]:
 app = FastAPI(title="보이는 교실 — classroom_sim web", version="0.6")
 
 
-ALLOWED_BACKENDS = ("mock", "codex", "anthropic")
+# 서버리스에서는 codex를 쓸 수 없다 — codex CLI라는 하위 프로세스를 띄우는데
+# 서버리스 런타임에는 그 실행 파일도, 로그인 상태도 없다.
+ALLOWED_BACKENDS = ("mock", "anthropic") if stateless() else ("mock", "codex", "anthropic")
 MAX_INPUT_CHARS = 2000       # 교사 입력 1회 상한
 MAX_LESSON_BYTES = 200_000   # 수업안 파일 상한 (~200KB)
 MAX_STUDENTS = 40            # 학급 인원 상한
@@ -633,6 +644,8 @@ def healthz() -> dict:
         "store": STORE.name,          # disk / disk+supabase — 배포 후 설정이 먹었는지 확인용
         "auth": "required" if AUTH.required else "open",
         "remote_auth": (remote_config().describe() if remote_config() else "none"),
+        "mode": "serverless" if stateless() else "server",
+        "backends": list(ALLOWED_BACKENDS),
     }
 
 
@@ -770,7 +783,12 @@ def take_turn(session_id: str, req: TurnReq, request: Request) -> dict:
         if getattr(result, "report_markdown", None):
             out["report_saved_path"], out["report_id"] = _save_report(rec, session_id, result.report_markdown)
     else:
-        _persist_session(session_id, rec)
+        if not _persist_session(session_id, rec) and stateless():
+            # 서버리스에서 저장이 안 되면 이 턴이 마지막으로 남는 기록이다.
+            # 교사가 모르고 계속 진행했다가 통째로 잃는 것보다 지금 아는 편이 낫다.
+            out["notice"] = ("⚠️ 이번 턴을 저장하지 못했습니다. 지금 [전사 내려받기]로 "
+                             "기록을 남기고, 잠시 후 다시 시도해 주세요. "
+                             "(저장소 연결을 확인해야 할 수 있습니다)")
     return out
 
 

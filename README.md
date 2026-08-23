@@ -62,7 +62,7 @@ PYTHONPATH=src python -m classroom_sim.web --port 8000 --host 0.0.0.0
 
 새로고침·서버 재시작 후에도 진행 중 수업을 "이어하기"로 재개할 수 있고(세션 스냅샷), 상태 확인은 `GET /healthz`, 회귀 테스트는 `python tests/regression/run_all.py`로 실행합니다. 공개 인터넷에 올리거나 여러 교사가 나눠 쓴다면 **로그인(Supabase Auth 이메일 인증)** 과 세션 스냅샷의 클라우드 저장을 켤 수 있습니다 — [docs/supabase_setup.md](docs/supabase_setup.md) 참조. 설정하지 않으면 기존대로 로그인 없이 로컬 디스크만 사용합니다(같은 Wi-Fi 안에서 쓰는 전제). **ChatGPT로 수업하기**: 서버에 `POST /mcp` (MCP 도구 7종)가 있어, ChatGPT가 무대 감독과 학생 배우를 맡고 서버는 게이지 급변·페르소나 붕괴·발언 쏠림을 잡는 심판만 봅니다 — 서버가 LLM을 호출하지 않아 운영비가 들지 않습니다. 연결 방법은 [docs/chatgpt_app_setup.md](docs/chatgpt_app_setup.md) 참조.
 
-출시 준비 상태·남은 리스크·체크리스트는 **[docs/release_checklist.md](docs/release_checklist.md)** 를 참고하세요.
+**배포**: Vercel(서버리스) 또는 Docker 컨테이너로 올릴 수 있습니다 — [docs/deploy.md](docs/deploy.md). 서버리스에서는 Supabase가 필수이고 codex 백엔드를 쓸 수 없습니다(하위 프로세스를 띄우므로). 출시 준비 상태·남은 리스크·체크리스트는 **[docs/release_checklist.md](docs/release_checklist.md)** 를 참고하세요.
 
 ### CLI 옵션
 

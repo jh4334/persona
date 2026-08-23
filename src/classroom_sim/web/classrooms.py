@@ -27,7 +27,7 @@ import uuid
 from pathlib import Path
 
 from ..personas import Classroom, load_classroom, parse_classroom
-from .store import SAVE_TIMEOUT, Remote, remote_config
+from .store import SAVE_TIMEOUT, Remote, remote_config, stateless
 
 log = logging.getLogger("classroom_sim.web")
 
@@ -100,13 +100,17 @@ class MyClassrooms:
 
     name = "none"
 
-    def list(self, user_id: str, token: str | None = None) -> list[dict]: ...
+    def list(self, user_id: str, token: str | None = None) -> list[dict]:
+        return []
 
-    def get(self, user_id: str, cid: str, token: str | None = None) -> dict | None: ...
+    def get(self, user_id: str, cid: str, token: str | None = None) -> dict | None:
+        return None
 
-    def create(self, user_id: str, data: dict, cid: str, token: str | None = None) -> None: ...
+    def create(self, user_id: str, data: dict, cid: str, token: str | None = None) -> None:
+        raise ClassroomError("학급 저장소가 설정되지 않았습니다. 관리자에게 문의해 주세요.")
 
-    def delete(self, user_id: str, cid: str, token: str | None = None) -> bool: ...
+    def delete(self, user_id: str, cid: str, token: str | None = None) -> bool:
+        return False
 
 
 class DiskClassrooms(MyClassrooms):
@@ -243,13 +247,18 @@ class ClassroomLibrary:
     def __init__(self, root: Path, disk_dir: Path) -> None:
         self.samples = SampleClassrooms(root)
         cfg = remote_config("classrooms")
+        self.mine: MyClassrooms = MyClassrooms()
         if cfg:
             try:
-                self.mine: MyClassrooms = SupabaseClassrooms(cfg)
+                self.mine = SupabaseClassrooms(cfg)
                 log.info("내 학급 저장소: Supabase (classrooms 테이블, 인증 %s)", cfg.describe())
+                return
             except Exception as exc:
-                log.warning("Supabase 학급 저장소를 만들지 못했습니다 (디스크 사용): %s", exc)
-                self.mine = DiskClassrooms(disk_dir)
+                log.warning("Supabase 학급 저장소를 만들지 못했습니다: %s", exc)
+        if stateless():
+            # 서버리스에서 디스크로 폴백하면 다음 요청에서 학급이 사라진다.
+            # 저장이 안 되는 것보다, 안 된다고 말하는 편이 낫다.
+            log.error("서버리스인데 Supabase가 없습니다 — 내 학급을 만들 수 없습니다.")
         else:
             self.mine = DiskClassrooms(disk_dir)
 

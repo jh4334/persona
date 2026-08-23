@@ -24,7 +24,7 @@ import time
 import uuid
 from pathlib import Path
 
-from .store import SAVE_TIMEOUT, Remote, remote_config
+from .store import SAVE_TIMEOUT, Remote, remote_config, stateless
 
 log = logging.getLogger("classroom_sim.web")
 
@@ -206,6 +206,8 @@ class ReportLibrary:
     """디스크 파일은 늘 남기고, 목록·열람은 설정된 저장소에서 한다."""
 
     def __init__(self, disk_dir: Path) -> None:
+        # 서버리스에서는 디스크에 써도 다음 요청에서 사라진다 — 아예 쓰지 않는다
+        self.use_disk = not stateless()
         self.disk = DiskReports(disk_dir)
         cfg = remote_config("reports")
         self.remote: SupabaseReports | None = None
@@ -218,14 +220,17 @@ class ReportLibrary:
 
     @property
     def name(self) -> str:
-        return "disk+supabase" if self.remote else "disk"
+        if self.remote:
+            return "disk+supabase" if self.use_disk else "supabase"
+        return "disk" if self.use_disk else "none"
 
     def save(self, meta: dict, markdown: str, transcript: object, base: str,
              token: str | None = None) -> str:
         """리포트를 남기고 기록 id를 돌려준다. 원격이 실패해도 디스크는 남는다."""
         meta = {**meta, "id": meta.get("id") or str(uuid.uuid4()),
                 "created_at": meta.get("created_at") or time.time()}
-        self.disk.save(meta, markdown, transcript, base)
+        if self.use_disk:
+            self.disk.save(meta, markdown, transcript, base)
         if self.remote:
             try:
                 self.remote.save(meta, markdown, transcript, token)
@@ -240,7 +245,7 @@ class ReportLibrary:
                 return self.remote.list(uid or "local", token)
             except Exception as exc:
                 log.warning("수업 기록 원격 조회 실패 (디스크로 대체): %s", exc)
-        return self.disk.list(uid)
+        return self.disk.list(uid) if self.use_disk else []
 
     def get(self, user_id: str | None, rid: str, token: str | None = None) -> dict:
         uid = user_id or ""
@@ -250,7 +255,7 @@ class ReportLibrary:
                 got = self.remote.get(uid or "local", rid, token)
             except Exception as exc:
                 log.warning("수업 기록 원격 열람 실패 (디스크로 대체): %s", exc)
-        if got is None:
+        if got is None and self.use_disk:
             got = self.disk.get(uid, rid)
         if got is None:
             raise ReportError("수업 기록을 찾을 수 없습니다.")
@@ -258,7 +263,7 @@ class ReportLibrary:
 
     def delete(self, user_id: str | None, rid: str, token: str | None = None) -> None:
         uid = user_id or ""
-        hit = self.disk.delete(uid, rid)
+        hit = self.disk.delete(uid, rid) if self.use_disk else False
         if self.remote:
             try:
                 hit = self.remote.delete(uid or "local", rid, token) or hit

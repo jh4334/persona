@@ -1,0 +1,34 @@
+name: 회귀 테스트
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          pip install -r requirements.txt
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: 회귀 스위트 일괄 실행
+        env:
+          # playwright install 이 놓는 기본 위치를 쓴다
+          PLAYWRIGHT_CHROMIUM: ""
+        run: python tests/regression/run_all.py
+
+      - name: 컨테이너 이미지 빌드 확인
+        run: docker build -t boineun-gyosil:ci .

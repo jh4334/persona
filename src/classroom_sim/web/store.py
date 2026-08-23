@@ -343,17 +343,46 @@ def supabase_config() -> tuple[str, str, str] | None:
     return r.url, (r.service_key or r.anon_key), r.table
 
 
+def stateless() -> bool:
+    """서버리스(Vercel 등)에서 도는가?
+
+    서버리스는 요청마다 다른 인스턴스일 수 있고 로컬 디스크가 남지 않는다.
+    그래서 디스크 저장소를 아예 붙이지 않고 원격만 쓴다. 붙여 두면 "저장됐다"고
+    믿었다가 다음 요청에서 사라지는, 가장 나쁜 종류의 실패가 난다.
+
+    Vercel은 VERCEL 환경변수를 자동으로 넣어 준다. 다른 서버리스 환경에서는
+    CLASSROOM_SIM_STATELESS=1 로 직접 켠다.
+    """
+    if (os.environ.get("CLASSROOM_SIM_STATELESS") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    return bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+
+
 def make_store(disk_dir: Path) -> SnapshotStore:
-    """환경변수를 보고 저장소를 구성한다. 디스크는 항상 포함된다."""
-    stores: list[SnapshotStore] = [DiskStore(disk_dir)]
+    """환경변수를 보고 저장소를 구성한다."""
     remote = remote_config()
+    remote_store: SnapshotStore | None = None
     if remote:
         try:
-            stores.append(SupabaseStore("", remote=remote))
-            log.info("세션 스냅샷: 디스크 + Supabase(%s, 테이블 %s, 인증 %s)",
-                     remote.url, remote.table, remote.describe())
+            remote_store = SupabaseStore("", remote=remote)
         except Exception as exc:
-            log.warning("Supabase 저장소를 만들지 못했습니다 (디스크만 사용): %s", exc)
+            log.warning("Supabase 저장소를 만들지 못했습니다: %s", exc)
+
+    if stateless():
+        # 디스크는 쓰지 않는다 — 다음 요청이 다른 인스턴스일 수 있다
+        if remote_store is None:
+            log.error("서버리스인데 Supabase가 설정되지 않았습니다 — 수업이 턴마다 사라집니다. "
+                      "SUPABASE_URL 과 키를 설정하세요.")
+            return SnapshotStore()          # 아무 데도 저장하지 않음 (명시적)
+        log.info("세션 스냅샷: Supabase 전용 (서버리스 — %s, 인증 %s)",
+                 remote.url, remote.describe())
+        return remote_store
+
+    stores: list[SnapshotStore] = [DiskStore(disk_dir)]
+    if remote_store is not None:
+        stores.append(remote_store)
+        log.info("세션 스냅샷: 디스크 + Supabase(%s, 테이블 %s, 인증 %s)",
+                 remote.url, remote.table, remote.describe())
     if len(stores) == 1:
         return stores[0]
     return MirrorStore(stores)

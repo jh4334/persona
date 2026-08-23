@@ -1,0 +1,13 @@
+.git/
+tests/
+docs/
+reports/
+scripts/
+.sessions/
+.classrooms/
+__pycache__/
+*.pyc
+.env
+api/
+vercel.json
+design-qa.md
